@@ -44,6 +44,10 @@ Series list -> sheets -> *read* the sheet, or play its exercises.
   at the answers, the watch buzzes a little (when "vibe feedback" is on); the result
   screen cheers with a Slovak word, the fox, and the rabbit from 70 %.
 - `[USER_NAME]` in the course is replaced by `name` of the config.
+- **Standby**: while a quiz, the result or a sheet is shown, the watch does not jump back
+  to the main tile when the screen goes off (the "block return to main tile" setting is
+  restored when leaving). If it is left anyway, the series resumes where it was (an answered
+  question moves on, an unanswered one starts again).
 
 Not on the watch: audio (`listen` exercises), images and matching exercises.
 Emojis and typographic symbols outside the font are dropped or replaced by ASCII

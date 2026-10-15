@@ -33,6 +33,7 @@
     #include <Arduino.h>
     #include <esp_system.h>
     #include "hardware/motor.h"
+    #include "hardware/display.h"
 #endif
 
 #include "slovingo_app.h"
@@ -219,6 +220,9 @@ static int slv_score = 0;
 static bool slv_q_answered = false;
 /* lv_tick time when the next question is shown after an answer, 0 = nothing scheduled */
 static uint32_t slv_advance_at = 0;
+/* the watch goes back to the main tile when the screen goes off, unless the display setting "block maintile" is on */
+static bool slv_hold = false;
+static bool slv_block_saved = false;
 static slv_question_t slv_q;
 
 static void slv_show( slv_screen_t screen );
@@ -1323,6 +1327,25 @@ static void slv_add_mascots( int pct ) {
     }
 }
 
+/*
+ * while a quiz or a sheet is on screen the watch stays on it when the screen goes
+ * off, like the map app does; the setting of the user comes back when the screen changes
+ */
+static void slv_hold_screen( bool hold ) {
+    if ( hold == slv_hold )
+        return;
+#ifndef NATIVE_64BIT
+    if ( hold ) {
+        slv_block_saved = display_get_block_return_maintile();
+        display_set_block_return_maintile( true );
+    }
+    else {
+        display_set_block_return_maintile( slv_block_saved );
+    }
+#endif
+    slv_hold = hold;
+}
+
 static void slv_show( slv_screen_t screen ) {
     char text[ 160 ];
 
@@ -1337,6 +1360,7 @@ static void slv_show( slv_screen_t screen ) {
     lv_obj_set_hidden( slv_refresh_btn, !( screen == SCR_GROUPS || screen == SCR_ERROR ) );
     lv_obj_set_hidden( slv_setup_btn, screen != SCR_GROUPS );
     lv_obj_set_hidden( slv_progress_lbl, !( screen == SCR_QUIZ || screen == SCR_READER ) );
+    slv_hold_screen( screen == SCR_QUIZ || screen == SCR_READER || screen == SCR_RESULT );
     lv_obj_set_hidden( slv_mascot, screen != SCR_QUIZ );
     lv_obj_set_hidden( slv_prev_btn, screen != SCR_READER );
     lv_obj_set_hidden( slv_next_btn, screen != SCR_READER );
@@ -1618,13 +1642,33 @@ static void slv_app_activate_cb( void ) {
 static void slv_app_hibernate_cb( void ) {
     keyboard_hide();
     slv_advance_at = 0;
+    slv_hold_screen( false );
+
+    /* a series in progress keeps its exercises and comes back where it was: when the
+       screen was off the answer given is counted and the next question is ready */
+    bool series = ( slv_screen == SCR_QUIZ || slv_screen == SCR_RESULT ) && slv_ex;
 
     /* the big documents go, the index stays, the screens rebuild from it */
     delete slv_sheet;
     slv_sheet = NULL;
-    delete slv_ex;
-    slv_ex = NULL;
-    if ( slv_screen == SCR_READER || slv_screen == SCR_QUIZ || slv_screen == SCR_RESULT )
+    if ( !series ) {
+        delete slv_ex;
+        slv_ex = NULL;
+    }
+
+    if ( series ) {
+        if ( slv_screen == SCR_RESULT ) {
+            slv_goto( SCR_RESULT );
+        }
+        else if ( slv_q_answered ) {
+            slv_next_question();
+        }
+        else {
+            slv_q.picked_cnt = 0;
+            slv_goto( SCR_QUIZ );
+        }
+    }
+    else if ( slv_screen == SCR_READER || slv_screen == SCR_QUIZ || slv_screen == SCR_RESULT )
         slv_goto( SCR_SHEET );
     else if ( slv_screen == SCR_SETUP )
         slv_goto( slv_index ? SCR_GROUPS : SCR_ERROR );
