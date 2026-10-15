@@ -60,6 +60,54 @@ LV_IMG_DECLARE( slv_fox_sad_40 );
 LV_IMG_DECLARE( slv_fox_happy_64 );
 LV_IMG_DECLARE( slv_fox_sad_64 );
 LV_IMG_DECLARE( slv_rabbit_happy_64 );
+LV_IMG_DECLARE( slv_theme_default_32 );
+LV_IMG_DECLARE( slv_theme_basics_32 );
+LV_IMG_DECLARE( slv_theme_family_32 );
+LV_IMG_DECLARE( slv_theme_house_32 );
+LV_IMG_DECLARE( slv_theme_food_32 );
+LV_IMG_DECLARE( slv_theme_time_32 );
+LV_IMG_DECLARE( slv_theme_shopping_32 );
+LV_IMG_DECLARE( slv_theme_city_32 );
+LV_IMG_DECLARE( slv_theme_weather_32 );
+LV_IMG_DECLARE( slv_theme_mountains_32 );
+LV_IMG_DECLARE( slv_theme_easter_32 );
+LV_IMG_DECLARE( slv_theme_animals_32 );
+LV_IMG_DECLARE( slv_theme_games_32 );
+LV_IMG_DECLARE( slv_theme_sea_32 );
+
+/*
+ * the themes of the series (the "theme" of the sheets of index.json, the themes of the HTML
+ * site): a pictogram and a dark colour for the buttons; the first one is for the others
+ */
+static const struct {
+    const char *key;
+    const lv_img_dsc_t *img;
+    uint32_t color;
+} slv_themes[] = {
+    { "default",   &slv_theme_default_32,   0 },
+    { "basics",    &slv_theme_basics_32,    0x6F5200 },
+    { "family",    &slv_theme_family_32,    0x551C31 },
+    { "house",     &slv_theme_house_32,     0x253948 },
+    { "food",      &slv_theme_food_32,      0x732C12 },
+    { "time",      &slv_theme_time_32,      0x072E43 },
+    { "shopping",  &slv_theme_shopping_32,  0x691942 },
+    { "city",      &slv_theme_city_32,      0x06367E },
+    { "weather",   &slv_theme_weather_32,   0x253973 },
+    { "mountains", &slv_theme_mountains_32, 0x16402A },
+    { "easter",    &slv_theme_easter_32,    0x402A64 },
+    { "animals",   &slv_theme_animals_32,   0x643E09 },
+    { "games",     &slv_theme_games_32,     0x2F4900 },
+    { "sea",       &slv_theme_sea_32,       0x064946 }
+};
+#define SLV_THEME_CNT   ( sizeof( slv_themes ) / sizeof( slv_themes[ 0 ] ) )
+
+static uint8_t slv_theme_of( const char *key ) {
+    for ( size_t i = 1; i < SLV_THEME_CNT; i++ ) {
+        if ( key && !strcmp( slv_themes[ i ].key, key ) )
+            return( i );
+    }
+    return( 0 );
+}
 
 #ifdef NATIVE_64BIT
     #define SLV_RAND()      ( (uint32_t)rand() )
@@ -133,6 +181,7 @@ typedef struct {
     char cat[ 24 ];
     char sub[ 40 ];
     uint16_t count;
+    uint8_t theme;      /* index in slv_themes[] */
 } slv_group_t;
 
 typedef enum {
@@ -296,6 +345,99 @@ static lv_obj_t *slv_add_button( const char *text ) {
     return( btn );
 }
 
+/* colour of a button, 0 keeps the one of the theme of the watch */
+static void slv_tint( lv_obj_t *btn, uint32_t color ) {
+    if ( color )
+        lv_obj_set_style_local_bg_color( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( color ) );
+}
+
+/* button with a pictogram at its left, the text beside it */
+static lv_obj_t *slv_add_button_icon( const char *text, const lv_img_dsc_t *icon, uint32_t color ) {
+    char buffer[ 256 ];
+
+    slovingo_sanitize( text, buffer, sizeof( buffer ) );
+    lv_obj_t *btn = lv_btn_create( slv_page, NULL );
+    lv_obj_set_width( btn, slv_content_w() );
+    lv_btn_set_fit2( btn, LV_FIT_NONE, LV_FIT_TIGHT );
+    lv_btn_set_layout( btn, LV_LAYOUT_ROW_MID );
+    lv_obj_add_style( btn, LV_BTN_PART_MAIN, ws_get_button_style() );
+    lv_obj_set_style_local_pad_left( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_X );
+    lv_obj_set_style_local_pad_right( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_X );
+    lv_obj_set_style_local_pad_top( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_Y );
+    lv_obj_set_style_local_pad_bottom( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_Y );
+    lv_obj_set_style_local_pad_inner( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, 6 );
+    lv_obj_set_event_cb( btn, slv_item_event_cb );
+    slv_tint( btn, color );
+
+    lv_obj_t *img = lv_img_create( btn, NULL );
+    lv_img_set_src( img, icon );
+    lv_obj_t *label = lv_label_create( btn, NULL );
+    lv_label_set_long_mode( label, LV_LABEL_LONG_BREAK );
+    lv_obj_set_width( label, slv_content_w() - 2 * SLV_BTN_PAD_X - icon->header.w - 6 );
+    lv_label_set_align( label, LV_LABEL_ALIGN_LEFT );
+    lv_label_set_text( label, buffer );
+    lv_obj_add_style( label, LV_LABEL_PART_MAIN, &slv_style16 );
+
+    if ( slv_item_cnt < SLV_MAX_ITEMS )
+        slv_item[ slv_item_cnt++ ] = btn;
+    return( btn );
+}
+
+/* a heading: a picture at the left of a text (recolor gives "#RRGGBB text#" its colour), returns the label */
+static lv_obj_t *slv_add_head( const lv_img_dsc_t *icon, const char *text, bool big, bool recolor ) {
+    lv_obj_t *row = lv_cont_create( slv_page, NULL );
+
+    lv_cont_set_layout( row, LV_LAYOUT_ROW_MID );
+    lv_cont_set_fit2( row, LV_FIT_NONE, LV_FIT_TIGHT );
+    lv_obj_set_width( row, slv_content_w() );
+    lv_obj_set_style_local_bg_opa( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP );
+    lv_obj_set_style_local_border_width( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_all( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_inner( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 8 );
+    lv_obj_set_click( row, false );
+    lv_obj_set_drag_parent( row, true );
+
+    lv_obj_t *img = lv_img_create( row, NULL );
+    lv_img_set_src( img, icon );
+    lv_obj_t *label = lv_label_create( row, NULL );
+    lv_label_set_long_mode( label, LV_LABEL_LONG_BREAK );
+    lv_label_set_recolor( label, recolor );
+    lv_obj_set_width( label, slv_content_w() - icon->header.w - 8 );
+    lv_obj_add_style( label, LV_LABEL_PART_MAIN, big ? &slv_style22 : &slv_style16 );
+    lv_label_set_text( label, text );
+    return( label );
+}
+
+/* the fox bounces while the course is loading */
+static void slv_add_bouncing_fox( void ) {
+    lv_obj_t *box = lv_cont_create( slv_page, NULL );
+
+    lv_obj_set_size( box, slv_content_w(), 64 );
+    lv_obj_set_style_local_bg_opa( box, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP );
+    lv_obj_set_style_local_border_width( box, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_click( box, false );
+    lv_obj_set_drag_parent( box, true );
+
+    lv_obj_t *fox = lv_img_create( box, NULL );
+    lv_img_set_src( fox, &slv_fox_happy_40 );
+    lv_coord_t base = 20;
+    lv_obj_set_pos( fox, ( slv_content_w() - slv_fox_happy_40.header.w ) / 2, base );
+
+    lv_anim_t anim;
+    lv_anim_init( &anim );
+    lv_anim_set_var( &anim, fox );
+    lv_anim_set_exec_cb( &anim, (lv_anim_exec_xcb_t)lv_obj_set_y );
+    lv_anim_set_values( &anim, base, 2 );
+    lv_anim_set_time( &anim, 320 );
+    lv_anim_set_playback_time( &anim, 320 );
+    lv_anim_set_repeat_count( &anim, LV_ANIM_REPEAT_INFINITE );
+    lv_anim_path_t path;
+    lv_anim_path_init( &path );
+    lv_anim_path_set_cb( &path, lv_anim_path_ease_out );
+    lv_anim_set_path( &anim, &path );
+    lv_anim_start( &anim );
+}
+
 /*
  * word button: as wide as its word so that several fit on a line, registered
  * as item of the screen like the other buttons
@@ -375,6 +517,7 @@ static void slv_build_groups( void ) {
                     group->label[ 0 ] -= 'a' - 'A';
             }
             group->count = 0;
+            group->theme = slv_theme_of( sheet["theme"] | "" );
         }
         slv_groups[ found ].count++;
     }
@@ -1445,27 +1588,52 @@ static void slv_show( slv_screen_t screen ) {
 
     switch ( screen ) {
         case SCR_LOADING:
+            slv_add_bouncing_fox();
             slv_add_label( TXT_LOADING, true );
             break;
 
-        case SCR_ERROR:
+        case SCR_ERROR: {
+            lv_obj_t *sad = lv_img_create( slv_page, NULL );
+            lv_img_set_src( sad, &slv_fox_sad_64 );
             slv_add_label( slv_error_text, false );
             break;
+        }
 
-        case SCR_GROUPS:
+        case SCR_GROUPS: {
+            /* the welcome line of the course, when it has one, beside the fox */
+            const char *hello = slv_index ? (const char*)( (*slv_index)["greeting"]["t"] | "" ) : "";
+            if ( *hello ) {
+                char line[ 96 ];
+                char trans[ 96 ];
+
+                slv_clean( hello, line, sizeof( line ) );
+                slv_clean( slv_index ? (const char*)( (*slv_index)["greeting"]["n"] | "" ) : "", trans, sizeof( trans ) );
+                if ( *trans )
+                    snprintf( text, sizeof( text ), "%s\n#A0A7B0 %s#", line, trans );
+                else
+                    snprintf( text, sizeof( text ), "%s", line );
+                slv_add_head( &slv_fox_neutral_40, text, false, *trans != '\0' );
+            }
             slv_add_label( slv_index ? ( (*slv_index)["title"] | TXT_COURSE ) : TXT_COURSE, true );
             for ( int i = 0; i < slv_group_cnt; i++ ) {
                 snprintf( text, sizeof( text ), "%s (%d)", slv_groups[ i ].label, slv_groups[ i ].count );
-                slv_add_button( text );
+                slv_add_button_icon( text, slv_themes[ slv_groups[ i ].theme ].img, slv_themes[ slv_groups[ i ].theme ].color );
             }
             break;
+        }
 
         case SCR_SHEETS:
             slv_collect_sheets( slv_cur_group );
-            slv_add_label( slv_cur_group >= 0 ? slv_groups[ slv_cur_group ].label : "", true );
-            for ( int i = 0; i < slv_sheet_cnt; i++ ) {
-                JsonObject sheet = (*slv_index)["sheets"][ slv_sheet_idx[ i ] ];
-                slv_add_button( sheet["title"] | "?" );
+            {
+                uint8_t theme = slv_cur_group >= 0 ? slv_groups[ slv_cur_group ].theme : 0;
+                char head[ 64 ];
+
+                slovingo_sanitize( slv_cur_group >= 0 ? slv_groups[ slv_cur_group ].label : "", head, sizeof( head ) );
+                slv_add_head( slv_themes[ theme ].img, head, true, false );
+                for ( int i = 0; i < slv_sheet_cnt; i++ ) {
+                    JsonObject sheet = (*slv_index)["sheets"][ slv_sheet_idx[ i ] ];
+                    slv_tint( slv_add_button( sheet["title"] | "?" ), slv_themes[ theme ].color );
+                }
             }
             break;
 
@@ -1473,11 +1641,12 @@ static void slv_show( slv_screen_t screen ) {
             JsonObject sheet = slv_cur_sheet_obj();
             int playable = slv_playable_count( sheet );
 
-            slv_add_label( sheet["title"] | "?", false );
-            slv_add_button( TXT_READ );
+            slovingo_sanitize( sheet["title"] | "?", text, sizeof( text ) );
+            slv_add_head( &slv_fox_neutral_40, text, false, false );
+            slv_tint( slv_add_button( TXT_READ ), 0x1F4E79 );
             if ( playable > 0 ) {
                 snprintf( text, sizeof( text ), "%s (%d)", TXT_EXERCISES, playable );
-                slv_add_button( text );
+                slv_tint( slv_add_button( text ), 0x8A4B08 );
             }
             else {
                 slv_add_label( TXT_NO_EXERCISES, false );
