@@ -500,7 +500,7 @@ static void slv_reader_paginate( void ) {
 
     slv_rd_cnt = 0;
     slv_rd_cur = 0;
-    slv_rd_hide = false;
+    slv_rd_hide = true;                 /* translations start hidden: guess first, tap to check */
     if ( !slv_sheet )
         return;
 
