@@ -61,7 +61,8 @@ LV_FONT_DECLARE( slovingo_22px );
  * margins of the text pages, tighter than the theme ones to give the text more room
  */
 #define SLV_SIDE_MARGIN     2       /* px left and right of the text */
-#define SLV_GAP             2       /* px above, below and between the lines */
+#define SLV_GAP             2       /* px above and below the page */
+#define SLV_ITEM_GAP        5       /* px between two blocks (buttons, labels) */
 #define SLV_BTN_PAD_X       4       /* px inside a button, left and right of its text */
 #define SLV_BTN_PAD_Y       2       /* px inside a button, above and below its text */
 
@@ -944,7 +945,7 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     lv_obj_set_style_local_pad_right( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, 0 );
     lv_obj_set_style_local_pad_top( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
     lv_obj_set_style_local_pad_bottom( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
-    lv_obj_set_style_local_pad_inner( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
+    lv_obj_set_style_local_pad_inner( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_ITEM_GAP );
 
     slv_exit_btn = wf_add_exit_button( slv_tile, slv_back_event_cb );
     lv_obj_align( slv_exit_btn, slv_tile, LV_ALIGN_IN_BOTTOM_LEFT, THEME_ICON_PADDING, -THEME_ICON_PADDING );
