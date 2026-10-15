@@ -58,6 +58,12 @@ LV_FONT_DECLARE( slovingo_22px );
 #endif
 
 /*
+ * margins of the text pages, tighter than the theme ones to give the text more room
+ */
+#define SLV_SIDE_MARGIN     2       /* px left and right of the text */
+#define SLV_GAP             2       /* px above, below and between the lines */
+
+/*
  * texts of the interface (the course content has its own language)
  */
 #define TXT_LOADING         "Chargement..."
@@ -194,7 +200,7 @@ static void slv_textarea_event_cb( lv_obj_t * obj, lv_event_t event );
  * ---------------------------------------------------------------------- */
 
 static lv_coord_t slv_content_w( void ) {
-    return( lv_disp_get_hor_res( NULL ) - 4 * THEME_PADDING );
+    return( lv_disp_get_hor_res( NULL ) - 2 * SLV_SIDE_MARGIN );
 }
 
 /*
@@ -928,9 +934,9 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     lv_obj_add_style( slv_page, LV_OBJ_PART_MAIN, APP_STYLE );
     lv_page_set_scrlbar_mode( slv_page, LV_SCRLBAR_MODE_DRAG );
     lv_page_set_scrl_layout( slv_page, LV_LAYOUT_COLUMN_MID );
-    lv_obj_set_style_local_pad_top( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, THEME_PADDING );
-    lv_obj_set_style_local_pad_bottom( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, THEME_PADDING );
-    lv_obj_set_style_local_pad_inner( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, THEME_PADDING );
+    lv_obj_set_style_local_pad_top( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
+    lv_obj_set_style_local_pad_bottom( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
+    lv_obj_set_style_local_pad_inner( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
 
     slv_exit_btn = wf_add_exit_button( slv_tile, slv_back_event_cb );
     lv_obj_align( slv_exit_btn, slv_tile, LV_ALIGN_IN_BOTTOM_LEFT, THEME_ICON_PADDING, -THEME_ICON_PADDING );
