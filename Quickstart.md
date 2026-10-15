@@ -25,7 +25,7 @@ cp conf/weather.json.example  data/weather.json     # facultatif
 
 | Fichier (sur la montre) | Ce qu'on y règle |
 |---|---|
-| `slovingo.json` | `url` : dossier `api/` du cours (par défaut `https://lstux.github.io/Slovingo-sk-fr-kids/api/`), `questions` : nombre de questions par série d'exercices |
+| `slovingo.json` | `url` : dossier `api/` du cours (par défaut `https://lstux.github.io/Slovingo-sk-fr-kids/api/`), `questions` : nombre de questions par série d'exercices, `name` : prénom affiché à la place de `[USER_NAME]` dans les dialogues (par défaut `Líška`) |
 | `wificfg.json` | `networklist` : `ssid` et `psk` de tes réseaux (jusqu'à 20), `hostname`, `ftpserver` / `ftpuser` / `ftppass`, `webserver`, `mqtt*` |
 | `weather.json` | `apikey` OpenWeatherMap, `lat`, `lon` |
 

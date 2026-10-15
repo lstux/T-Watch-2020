@@ -82,6 +82,9 @@ LV_FONT_DECLARE( slovingo_22px );
 #define TXT_DEFAULT         "Valeur par défaut"
 #define TXT_URL_HELP        "Adresse du dossier du cours (api) :"
 #define TXT_COURSE          "Cours"
+#define TXT_EMPTY_SHEET     "Fiche vide"
+#define TXT_HIDE_TRANSLATIONS "Cacher les traductions"
+#define TXT_SHOW_TRANSLATIONS "Afficher les traductions"
 #define TXT_ORDER           "Remets les mots dans l'ordre"
 
 #define SLV_MAX_GROUPS      32
@@ -93,7 +96,6 @@ LV_FONT_DECLARE( slovingo_22px );
 #define SLV_MAX_SHOWN       ( SLV_MAX_TOKENS + SLV_MAX_DISTRACT )
 #define SLV_MAX_CAND        20      /* distractor candidates looked at */
 #define SLV_TOKEN_LEN       40
-#define SLV_TEXT_MAX        16384
 
 typedef enum {
     SCR_LOADING,
@@ -153,6 +155,8 @@ static lv_obj_t *slv_refresh_btn = NULL;
 static lv_obj_t *slv_progress_lbl = NULL;   /* "x/x  Score: n" in the footer, quiz only */
 static lv_obj_t *slv_built_lbl = NULL;      /* order: the sentence built so far, quiz only */
 static lv_obj_t *slv_setup_btn = NULL;
+static lv_obj_t *slv_prev_btn = NULL;       /* reader: previous and next page */
+static lv_obj_t *slv_next_btn = NULL;
 static lv_obj_t *slv_url_textarea = NULL;
 static lv_task_t *slv_task = NULL;
 static lv_style_t slv_style16;
@@ -216,6 +220,7 @@ static void slv_lv_task( lv_task_t * task );
 static void slv_back_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_refresh_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_setup_event_cb( lv_obj_t * obj, lv_event_t event );
+static void slv_nav_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_textarea_event_cb( lv_obj_t * obj, lv_event_t event );
 
@@ -308,23 +313,6 @@ static int slv_item_index( lv_obj_t *obj ) {
     return( -1 );
 }
 
-/*
- * append a cleaned up piece of text, a piece that does not fit is dropped
- */
-static void slv_cat( char *dst, size_t cap, size_t *len, const char *text ) {
-    char piece[ 384 ];
-
-    if ( !text )
-        return;
-    slovingo_sanitize( text, piece, sizeof( piece ) );
-    size_t n = strlen( piece );
-    if ( *len + n + 1 > cap )
-        return;
-    memcpy( dst + *len, piece, n );
-    *len += n;
-    dst[ *len ] = '\0';
-}
-
 /* ------------------------------------------------------------------------
  * groups and sheets of the index
  * ---------------------------------------------------------------------- */
@@ -398,71 +386,465 @@ static int slv_playable_count( JsonObject sheet ) {
 }
 
 /* ------------------------------------------------------------------------
- * reader: sheet blocks -> plain text
+ * reader: the sheet in pages
+ *
+ * A page is a heading plus text blocks, a few lines of dialogue or a few rows
+ * of a vocabulary table, so that it fits the screen. The arrows of the footer
+ * turn the pages. A dialogue line shows who speaks, the translation under it,
+ * and the word by word glosses when it is tapped. A vocabulary row is a card,
+ * a tap shows or hides its translation.
  * ---------------------------------------------------------------------- */
 
-static char *slv_build_reader_text( void ) {
-    char *text = (char*)MALLOC( SLV_TEXT_MAX );
-    size_t len = 0;
+#define SLV_NONE            255
+#define SLV_RD_TEXT_CHARS   260     /* characters of text on a page */
+#define SLV_RD_DIALOG_CHARS 200     /* characters of dialogue on a page */
+#define SLV_RD_DIALOG_LINES 3
+#define SLV_RD_TABLE_ROWS   3
+#define SLV_MAX_PAGES       160
+#define SLV_MAX_SPEAKERS    8
+#define SLV_CARD_PAD        3
+#define SLV_COLOR_TITLE     0x4FC3F7
+#define SLV_COLOR_DIM       0xA0A7B0
+#define SLV_COLOR_GLOSS     0x8AB4F8
+#define SLV_COLOR_CARD      0x23272E
+#define SLV_EMOJI_FOX       "\xF0\x9F\xA6\x8A"
 
-    if ( !text )
-        return( NULL );
-    text[ 0 ] = '\0';
+typedef enum {
+    RD_TEXT,
+    RD_DIALOG,
+    RD_TABLE
+} slv_rd_kind_t;
+
+typedef struct {
+    uint8_t kind;
+    uint8_t head;       /* heading block shown on top, SLV_NONE if none */
+    uint8_t first;      /* first and last body block, SLV_NONE if the page has no body */
+    uint8_t last;
+    uint8_t row_from;   /* table: the rows shown, row_to excluded */
+    uint8_t row_to;
+} slv_rd_page_t;
+
+typedef struct {
+    char emoji[ 12 ];
+    char name[ 24 ];
+} slv_speaker_t;
+
+static slv_rd_page_t slv_rd[ SLV_MAX_PAGES ];
+static int slv_rd_cnt = 0;
+static int slv_rd_cur = 0;
+static bool slv_rd_hide = false;                    /* vocabulary: translations hidden */
+static lv_obj_t *slv_rd_more[ SLV_MAX_ITEMS ];      /* object a tap on item i shows or hides */
+static slv_speaker_t slv_spk[ SLV_MAX_SPEAKERS ];
+static int slv_spk_cnt = 0;
+
+/* characters of a block, to know how much fits on a page */
+static size_t slv_block_chars( JsonObject block ) {
+    const char *type = block["t"] | "";
+    size_t n = 0;
+
+    if ( !strcmp( type, "h" ) || !strcmp( type, "p" ) ) {
+        n = strlen( block["x"] | "" );
+    }
+    else if ( !strcmp( type, "list" ) ) {
+        JsonArray items = block["items"];
+        for ( JsonVariant item : items ) {
+            const char *text = item.as<const char*>();
+            n += ( text ? strlen( text ) : 0 ) + 2;
+        }
+    }
+    else if ( !strcmp( type, "card" ) ) {
+        n = strlen( block["x"] | "" ) + strlen( block["n"] | "" );
+    }
+    return( n );
+}
+
+static void slv_rd_add( uint8_t kind, uint8_t head, uint8_t first, uint8_t last, uint8_t row_from, uint8_t row_to ) {
+    if ( slv_rd_cnt >= SLV_MAX_PAGES )
+        return;
+    slv_rd_page_t *page = &slv_rd[ slv_rd_cnt++ ];
+    page->kind = kind;
+    page->head = head;
+    page->first = first;
+    page->last = last;
+    page->row_from = row_from;
+    page->row_to = row_to;
+}
+
+/*
+ * cut the blocks of the sheet into pages: a heading goes with what follows it,
+ * text blocks are put together up to a number of characters, a dialogue gets
+ * a few lines per page and a table a few rows
+ */
+static void slv_reader_paginate( void ) {
+    uint8_t head = SLV_NONE;
+    size_t chars = 0;
+    int lines = 0;
+
+    slv_rd_cnt = 0;
+    slv_rd_cur = 0;
+    slv_rd_hide = false;
+    if ( !slv_sheet )
+        return;
 
     JsonArray blocks = (*slv_sheet)["blocks"];
-    for ( JsonObject block : blocks ) {
+    int total = blocks.size();
+    if ( total > SLV_NONE - 1 )
+        total = SLV_NONE - 1;
+
+    for ( int i = 0; i < total; i++ ) {
+        JsonObject block = blocks[ i ];
         const char *type = block["t"] | "";
+        size_t len = slv_block_chars( block );
+        slv_rd_page_t *last = slv_rd_cnt ? &slv_rd[ slv_rd_cnt - 1 ] : NULL;
 
         if ( !strcmp( type, "h" ) ) {
-            slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
-            slv_cat( text, SLV_TEXT_MAX, &len, block["x"] | "" );
-            slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
-        }
-        else if ( !strcmp( type, "p" ) ) {
-            slv_cat( text, SLV_TEXT_MAX, &len, block["x"] | "" );
-            slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
+            if ( head != SLV_NONE )     /* two headings in a row: the first gets a page of its own */
+                slv_rd_add( RD_TEXT, head, SLV_NONE, SLV_NONE, 0, 0 );
+            head = i;
         }
         else if ( !strcmp( type, "table" ) ) {
             JsonArray rows = block["rows"];
-            for ( JsonArray row : rows ) {
-                bool first = true;
-                for ( JsonVariant cell : row ) {
-                    slv_cat( text, SLV_TEXT_MAX, &len, first ? "" : " = " );
-                    slv_cat( text, SLV_TEXT_MAX, &len, cell.as<const char*>() );
-                    first = false;
-                }
-                slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
-            }
+            int n = rows.size();
+            for ( int r = 0; r < n; r += SLV_RD_TABLE_ROWS )
+                slv_rd_add( RD_TABLE, r ? SLV_NONE : head, i, i, r, ( r + SLV_RD_TABLE_ROWS < n ) ? r + SLV_RD_TABLE_ROWS : n );
+            head = SLV_NONE;
         }
         else if ( !strcmp( type, "card" ) ) {
-            slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
-            slv_cat( text, SLV_TEXT_MAX, &len, block["x"] | "" );
-            slv_cat( text, SLV_TEXT_MAX, &len, "\n   " );
-            slv_cat( text, SLV_TEXT_MAX, &len, block["n"] | "" );
-            slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
-            JsonArray literal = block["lit"];
-            for ( JsonVariant line : literal ) {
-                slv_cat( text, SLV_TEXT_MAX, &len, "   - " );
-                slv_cat( text, SLV_TEXT_MAX, &len, line.as<const char*>() );
-                slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
+            if ( last && head == SLV_NONE && last->kind == RD_DIALOG && lines < SLV_RD_DIALOG_LINES && chars + len <= SLV_RD_DIALOG_CHARS ) {
+                last->last = i;
+                chars += len;
+                lines++;
             }
-            JsonArray notes = block["nt"];
-            for ( JsonVariant line : notes ) {
-                slv_cat( text, SLV_TEXT_MAX, &len, "   * " );
-                slv_cat( text, SLV_TEXT_MAX, &len, line.as<const char*>() );
-                slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
+            else {
+                slv_rd_add( RD_DIALOG, head, i, i, 0, 0 );
+                chars = len;
+                lines = 1;
+                head = SLV_NONE;
             }
         }
-        else if ( !strcmp( type, "list" ) ) {
-            JsonArray items = block["items"];
-            for ( JsonVariant item : items ) {
-                slv_cat( text, SLV_TEXT_MAX, &len, "- " );
-                slv_cat( text, SLV_TEXT_MAX, &len, item.as<const char*>() );
-                slv_cat( text, SLV_TEXT_MAX, &len, "\n" );
+        else if ( !strcmp( type, "p" ) || !strcmp( type, "list" ) ) {
+            if ( last && head == SLV_NONE && last->kind == RD_TEXT && last->first != SLV_NONE && chars + len <= SLV_RD_TEXT_CHARS ) {
+                last->last = i;
+                chars += len;
+            }
+            else {
+                chars = len + ( head != SLV_NONE ? slv_block_chars( blocks[ head ] ) : 0 );
+                slv_rd_add( RD_TEXT, head, i, i, 0, 0 );
+                head = SLV_NONE;
             }
         }
     }
-    return( text );
+    if ( head != SLV_NONE )
+        slv_rd_add( RD_TEXT, head, SLV_NONE, SLV_NONE, 0, 0 );
+}
+
+/*
+ * speakers of the dialogue: the course lists its characters ("<emoji> Name, who she is"),
+ * a character that is not listed gets a default name
+ */
+static const char *slv_spk_default( const char *emoji ) {
+    static const struct {
+        const char *emoji;
+        const char *name;
+    } known[] = {
+        { SLV_EMOJI_FOX, "Toi" },
+        { "\xF0\x9F\x90\xB0", "Lapin" },
+        { "\xF0\x9F\x90\xB9", "Hamster" },
+        { "\xF0\x9F\x90\xBB", "Ours" },
+        { "\xF0\x9F\x90\x91", "Mouton" },
+        { "\xF0\x9F\xA6\x94", "H\xC3\xA9risson" },
+        { "\xF0\x9F\xA6\x85", "Aigle" }
+    };
+
+    for ( size_t i = 0; i < sizeof( known ) / sizeof( known[ 0 ] ); i++ ) {
+        if ( !strcmp( known[ i ].emoji, emoji ) )
+            return( known[ i ].name );
+    }
+    return( "" );
+}
+
+static int slv_spk_find( const char *emoji ) {
+    for ( int i = 0; i < slv_spk_cnt; i++ ) {
+        if ( !strcmp( slv_spk[ i ].emoji, emoji ) )
+            return( i );
+    }
+    return( -1 );
+}
+
+static int slv_spk_add( const char *emoji, const char *name ) {
+    int found = slv_spk_find( emoji );
+
+    if ( found >= 0 )
+        return( found );
+    if ( slv_spk_cnt >= SLV_MAX_SPEAKERS || strlen( emoji ) >= sizeof( slv_spk[ 0 ].emoji ) )
+        return( -1 );
+    snprintf( slv_spk[ slv_spk_cnt ].emoji, sizeof( slv_spk[ 0 ].emoji ), "%s", emoji );
+    slovingo_sanitize( name, slv_spk[ slv_spk_cnt ].name, sizeof( slv_spk[ 0 ].name ) );
+    return( slv_spk_cnt++ );
+}
+
+static void slv_speakers_build( void ) {
+    slv_spk_cnt = 0;
+    if ( !slv_sheet )
+        return;
+
+    JsonArray blocks = (*slv_sheet)["blocks"];
+    for ( JsonObject block : blocks ) {
+        if ( strcmp( block["t"] | "", "list" ) )
+            continue;
+        JsonArray items = block["items"];
+        for ( JsonVariant item : items ) {
+            const char *text = item.as<const char*>();
+            if ( !text || (uint8_t)text[ 0 ] < 0xF0 )       /* an emoji starts the line */
+                continue;
+            const char *space = strchr( text, ' ' );
+            if ( !space || (size_t)( space - text ) >= sizeof( slv_spk[ 0 ].emoji ) )
+                continue;
+
+            char emoji[ sizeof( slv_spk[ 0 ].emoji ) ];
+            memcpy( emoji, text, space - text );
+            emoji[ space - text ] = '\0';
+
+            /* the name goes up to the first comma or parenthesis */
+            char name[ 40 ];
+            size_t n = 0;
+            for ( const char *c = space + 1; *c && *c != ',' && *c != '(' && n < sizeof( name ) - 1; c++ )
+                name[ n++ ] = *c;
+            while ( n && name[ n - 1 ] == ' ' )
+                n--;
+            name[ n ] = '\0';
+            slv_spk_add( emoji, name );
+        }
+    }
+}
+
+static int slv_spk_of( const char *emoji ) {
+    if ( !emoji || !*emoji )
+        return( -1 );
+    int found = slv_spk_find( emoji );
+    return( found >= 0 ? found : slv_spk_add( emoji, slv_spk_default( emoji ) ) );
+}
+
+static uint32_t slv_spk_color( int spk ) {
+    static const uint32_t palette[] = { 0x64B5F6, 0x81C784, 0xBA68C8, 0xF06292, 0x4DD0E1, 0xFFF176, 0xA1887F, 0x90A4AE };
+
+    if ( !strcmp( slv_spk[ spk ].emoji, SLV_EMOJI_FOX ) )
+        return( 0xFFB74D );
+    return( palette[ spk % 8 ] );
+}
+
+/*
+ * a card: a rounded box that can be tapped, filled with labels by the caller
+ */
+static lv_obj_t *slv_add_card( void ) {
+    lv_obj_t *card = lv_cont_create( slv_page, NULL );
+
+    lv_cont_set_layout( card, LV_LAYOUT_COLUMN_LEFT );
+    lv_cont_set_fit2( card, LV_FIT_NONE, LV_FIT_TIGHT );
+    lv_obj_set_width( card, slv_content_w() );
+    lv_obj_set_style_local_bg_color( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( SLV_COLOR_CARD ) );
+    lv_obj_set_style_local_bg_opa( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER );
+    lv_obj_set_style_local_radius( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 6 );
+    lv_obj_set_style_local_border_width( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_left( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, SLV_CARD_PAD );
+    lv_obj_set_style_local_pad_right( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, SLV_CARD_PAD );
+    lv_obj_set_style_local_pad_top( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, SLV_CARD_PAD );
+    lv_obj_set_style_local_pad_bottom( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, SLV_CARD_PAD );
+    lv_obj_set_style_local_pad_inner( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 1 );
+    lv_obj_set_click( card, true );
+    lv_obj_set_event_cb( card, slv_item_event_cb );
+
+    if ( slv_item_cnt < SLV_MAX_ITEMS )
+        slv_item[ slv_item_cnt++ ] = card;
+    return( card );
+}
+
+/* label in a card, text already cleaned up, recolor gives "#RRGGBB text#" its colour */
+static lv_obj_t *slv_card_label( lv_obj_t *card, const char *text, bool big, uint32_t color, bool recolor ) {
+    lv_obj_t *label = lv_label_create( card, NULL );
+
+    lv_label_set_long_mode( label, LV_LABEL_LONG_BREAK );
+    lv_label_set_recolor( label, recolor );
+    lv_obj_set_width( label, slv_content_w() - 2 * SLV_CARD_PAD );
+    lv_obj_add_style( label, LV_LABEL_PART_MAIN, big ? &slv_style22 : &slv_style16 );
+    lv_obj_set_style_local_text_color( label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( color ) );
+    lv_label_set_text( label, text );
+    return( label );
+}
+
+/* clean a piece of text for a label with recolor on: no '#' left in it */
+static void slv_clean( const char *in, char *out, size_t size ) {
+    slovingo_sanitize( in ? in : "", out, size );
+    for ( char *c = out; *c; c++ ) {
+        if ( *c == '#' )
+            *c = ' ';
+    }
+}
+
+/* append a cleaned up piece of text, what does not fit is dropped */
+static void slv_append( char *dst, size_t cap, const char *text ) {
+    char piece[ 200 ];
+    size_t len = strlen( dst );
+
+    slv_clean( text, piece, sizeof( piece ) );
+    size_t n = strlen( piece );
+    if ( len + n + 1 > cap )
+        return;
+    memcpy( dst + len, piece, n + 1 );
+}
+
+/* a dialogue line: who speaks and what, the translation, and the glosses and notes on a tap */
+static void slv_reader_card( JsonObject block ) {
+    char text[ 512 ];
+    char piece[ 256 ];
+    lv_obj_t *card = slv_add_card();
+    int item = slv_item_cnt - 1;
+    int spk = slv_spk_of( block["s"] | "" );
+    bool named = spk >= 0 && *slv_spk[ spk ].name;
+
+    slv_clean( block["x"] | "", piece, sizeof( piece ) );
+    if ( named )
+        snprintf( text, sizeof( text ), "#%06X %s:# %s", (unsigned)slv_spk_color( spk ), slv_spk[ spk ].name, piece );
+    else
+        snprintf( text, sizeof( text ), "%s", piece );
+    slv_card_label( card, text, false, 0xFFFFFF, named );
+
+    slv_clean( block["n"] | "", piece, sizeof( piece ) );
+    slv_card_label( card, piece, false, SLV_COLOR_DIM, false );
+
+    text[ 0 ] = '\0';
+    JsonArray gloss = block["lit"];
+    for ( JsonVariant line : gloss ) {
+        if ( *text )
+            slv_append( text, sizeof( text ), "\n" );
+        slv_append( text, sizeof( text ), line.as<const char*>() );
+    }
+    JsonArray notes = block["nt"];
+    for ( JsonVariant line : notes ) {
+        if ( *text )
+            slv_append( text, sizeof( text ), "\n" );
+        slv_append( text, sizeof( text ), "* " );
+        slv_append( text, sizeof( text ), line.as<const char*>() );
+    }
+    if ( *text ) {
+        lv_obj_t *more = slv_card_label( card, text, false, SLV_COLOR_GLOSS, false );
+        lv_obj_set_hidden( more, true );
+        slv_rd_more[ item ] = more;
+    }
+}
+
+/* vocabulary rows as cards: the first column big, the others (sound, meaning) under it */
+static void slv_reader_rows( JsonObject block, int from, int to ) {
+    JsonArray rows = block["rows"];
+
+    for ( int r = from; r < to; r++ ) {
+        JsonArray row = rows[ r ];
+        char first[ 128 ] = "";
+        char rest[ 256 ] = "";
+        int col = 0;
+
+        for ( JsonVariant cell : row ) {
+            if ( col++ == 0 ) {
+                slv_clean( cell.as<const char*>(), first, sizeof( first ) );
+            }
+            else {
+                char piece[ 128 ];
+                slv_clean( cell.as<const char*>(), piece, sizeof( piece ) );
+                if ( *piece ) {
+                    if ( *rest )
+                        slv_append( rest, sizeof( rest ), " - " );
+                    slv_append( rest, sizeof( rest ), piece );
+                }
+            }
+        }
+
+        lv_obj_t *card = slv_add_card();
+        int item = slv_item_cnt - 1;
+        slv_card_label( card, first, true, 0xFFFFFF, false );
+        if ( *rest ) {
+            lv_obj_t *more = slv_card_label( card, rest, false, SLV_COLOR_DIM, false );
+            lv_obj_set_hidden( more, slv_rd_hide );
+            slv_rd_more[ item ] = more;
+        }
+    }
+}
+
+static void slv_reader_render( void ) {
+    char text[ 512 ];
+
+    if ( !slv_sheet || slv_rd_cnt == 0 ) {
+        slv_add_label( TXT_EMPTY_SHEET, false );
+        return;
+    }
+
+    slv_rd_page_t *page = &slv_rd[ slv_rd_cur ];
+    JsonArray blocks = (*slv_sheet)["blocks"];
+
+    if ( slv_rd_cur == 0 )
+        slv_add_label( slv_cur_sheet_obj()["title"] | "?", true );
+    if ( page->head != SLV_NONE ) {
+        lv_obj_t *head = slv_add_label( blocks[ page->head ]["x"] | "", true );
+        lv_obj_set_style_local_text_color( head, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( SLV_COLOR_TITLE ) );
+    }
+
+    if ( page->kind == RD_TABLE ) {
+        slv_add_button( slv_rd_hide ? TXT_SHOW_TRANSLATIONS : TXT_HIDE_TRANSLATIONS );
+        slv_reader_rows( blocks[ page->first ], page->row_from, page->row_to );
+    }
+    else if ( page->first != SLV_NONE ) {
+        for ( int i = page->first; i <= page->last; i++ ) {
+            JsonObject block = blocks[ i ];
+            const char *type = block["t"] | "";
+
+            if ( !strcmp( type, "p" ) ) {
+                slv_add_label( block["x"] | "", false );
+            }
+            else if ( !strcmp( type, "list" ) ) {
+                JsonArray items = block["items"];
+                text[ 0 ] = '\0';
+                for ( JsonVariant item : items ) {
+                    const char *line = item.as<const char*>();
+                    char piece[ 160 ];
+                    slovingo_sanitize( line ? line : "", piece, sizeof( piece ) );
+                    const char *start = piece;
+                    while ( *start == ' ' )     /* an emoji that was dropped leaves a space */
+                        start++;
+                    if ( *text )
+                        slv_append( text, sizeof( text ), "\n" );
+                    slv_append( text, sizeof( text ), "- " );
+                    slv_append( text, sizeof( text ), start );
+                }
+                slv_add_label( text, false );
+            }
+            else if ( !strcmp( type, "card" ) ) {
+                slv_reader_card( block );
+            }
+        }
+    }
+
+    snprintf( text, sizeof( text ), "%d/%d", slv_rd_cur + 1, slv_rd_cnt );
+    lv_label_set_text( slv_progress_lbl, text );
+    if ( slv_rd_cur > 0 )
+        lv_obj_clear_state( slv_prev_btn, LV_STATE_DISABLED );
+    else
+        lv_obj_add_state( slv_prev_btn, LV_STATE_DISABLED );
+    if ( slv_rd_cur + 1 < slv_rd_cnt )
+        lv_obj_clear_state( slv_next_btn, LV_STATE_DISABLED );
+    else
+        lv_obj_add_state( slv_next_btn, LV_STATE_DISABLED );
+}
+
+/* a tap on a card shows or hides what goes with it, the first button of a table page hides all the translations */
+static void slv_reader_tap( int item ) {
+    if ( slv_rd_cnt == 0 )
+        return;
+    if ( slv_rd[ slv_rd_cur ].kind == RD_TABLE && item == 0 ) {
+        slv_rd_hide = !slv_rd_hide;
+        slv_goto( SCR_READER );
+        return;
+    }
+    if ( item >= 0 && item < SLV_MAX_ITEMS && slv_rd_more[ item ] )
+        lv_obj_set_hidden( slv_rd_more[ item ], !lv_obj_get_hidden( slv_rd_more[ item ] ) );
 }
 
 /* ------------------------------------------------------------------------
@@ -861,6 +1243,8 @@ static void slv_lv_task( lv_task_t * task ) {
                                 break;
         case REQ_SHEET:         delete slv_sheet;
                                 slv_sheet = doc;
+                                slv_speakers_build();
+                                slv_reader_paginate();
                                 slv_show( SCR_READER );
                                 break;
         case REQ_EXERCISES:     delete slv_ex;
@@ -898,7 +1282,10 @@ static void slv_show( slv_screen_t screen ) {
 
     lv_obj_set_hidden( slv_refresh_btn, !( screen == SCR_GROUPS || screen == SCR_ERROR ) );
     lv_obj_set_hidden( slv_setup_btn, screen != SCR_GROUPS );
-    lv_obj_set_hidden( slv_progress_lbl, screen != SCR_QUIZ );
+    lv_obj_set_hidden( slv_progress_lbl, !( screen == SCR_QUIZ || screen == SCR_READER ) );
+    lv_obj_set_hidden( slv_prev_btn, screen != SCR_READER );
+    lv_obj_set_hidden( slv_next_btn, screen != SCR_READER );
+    memset( slv_rd_more, 0, sizeof( slv_rd_more ) );
 
     switch ( screen ) {
         case SCR_LOADING:
@@ -942,23 +1329,9 @@ static void slv_show( slv_screen_t screen ) {
             break;
         }
 
-        case SCR_READER: {
-            JsonObject sheet = slv_cur_sheet_obj();
-            char *body = slv_build_reader_text();
-
-            slv_add_label( sheet["title"] | "?", true );
-            if ( body ) {
-                lv_obj_t *label = wf_add_label( slv_page, body );
-                lv_label_set_long_mode( label, LV_LABEL_LONG_BREAK );
-                lv_obj_set_width( label, slv_content_w() );
-                lv_obj_add_style( label, LV_LABEL_PART_MAIN, &slv_style16 );
-                free( body );
-            }
-            else {
-                slv_add_label( slovingo_result_text( SLOVINGO_ERR_MEM ), false );
-            }
+        case SCR_READER:
+            slv_reader_render();
             break;
-        }
 
         case SCR_QUIZ:
             snprintf( text, sizeof( text ), "%d/%d  Score: %d", slv_q_pos + 1, slv_q_cnt, slv_score );
@@ -1065,6 +1438,8 @@ static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
                             else
                                 slv_open_data( REQ_EXERCISES );
                             break;
+        case SCR_READER:    slv_reader_tap( item );
+                            break;
         case SCR_QUIZ:      if ( slv_q.kind == SLV_KIND_ORDER )
                                 slv_order_pick( item );
                             else
@@ -1146,6 +1521,19 @@ static void slv_setup_event_cb( lv_obj_t * obj, lv_event_t event ) {
         slv_goto( SCR_SETUP );
 }
 
+static void slv_nav_event_cb( lv_obj_t * obj, lv_event_t event ) {
+    if ( event != LV_EVENT_CLICKED || slv_screen != SCR_READER )
+        return;
+
+    if ( obj == slv_prev_btn && slv_rd_cur > 0 )
+        slv_rd_cur--;
+    else if ( obj == slv_next_btn && slv_rd_cur + 1 < slv_rd_cnt )
+        slv_rd_cur++;
+    else
+        return;
+    slv_goto( SCR_READER );
+}
+
 static void slv_textarea_event_cb( lv_obj_t * obj, lv_event_t event ) {
     if ( event == LV_EVENT_CLICKED )
         keyboard_set_textarea( obj );
@@ -1181,6 +1569,7 @@ static void slv_app_hibernate_cb( void ) {
 void slovingo_app_main_setup( uint32_t tile_num ) {
 
     slovingo_config.load();
+    slovingo_set_user_name( slovingo_config.name );
 
     mainbar_add_tile_activate_cb( tile_num, slv_app_activate_cb );
     mainbar_add_tile_hibernate_cb( tile_num, slv_app_hibernate_cb );
@@ -1221,6 +1610,23 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     lv_obj_align( slv_progress_lbl, slv_exit_btn, LV_ALIGN_OUT_RIGHT_MID, THEME_PADDING, 0 );
     lv_obj_set_hidden( slv_progress_lbl, true );
 
+    /* reader: next page at the right of the footer, previous page left of it, the page counter sits right of the exit arrow */
+    slv_next_btn = lv_btn_create( slv_tile, NULL );
+    lv_obj_set_size( slv_next_btn, THEME_ICON_SIZE, THEME_ICON_SIZE );
+    lv_obj_add_style( slv_next_btn, LV_BTN_PART_MAIN, ws_get_button_style() );
+    lv_obj_set_event_cb( slv_next_btn, slv_nav_event_cb );
+    lv_obj_align( slv_next_btn, slv_tile, LV_ALIGN_IN_BOTTOM_RIGHT, -THEME_ICON_PADDING, -THEME_ICON_PADDING );
+    lv_label_set_text( lv_label_create( slv_next_btn, NULL ), LV_SYMBOL_RIGHT );
+    lv_obj_set_hidden( slv_next_btn, true );
+
+    slv_prev_btn = lv_btn_create( slv_tile, NULL );
+    lv_obj_set_size( slv_prev_btn, THEME_ICON_SIZE, THEME_ICON_SIZE );
+    lv_obj_add_style( slv_prev_btn, LV_BTN_PART_MAIN, ws_get_button_style() );
+    lv_obj_set_event_cb( slv_prev_btn, slv_nav_event_cb );
+    lv_obj_align( slv_prev_btn, slv_next_btn, LV_ALIGN_OUT_LEFT_MID, -THEME_PADDING, 0 );
+    lv_label_set_text( lv_label_create( slv_prev_btn, NULL ), LV_SYMBOL_LEFT );
+    lv_obj_set_hidden( slv_prev_btn, true );
+
     slv_refresh_btn = wf_add_refresh_button( slv_tile, slv_refresh_event_cb );
     lv_obj_align( slv_refresh_btn, slv_tile, LV_ALIGN_IN_BOTTOM_MID, 0, -THEME_ICON_PADDING );
 
@@ -1232,6 +1638,8 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     lv_tileview_add_element( slv_tile, slv_refresh_btn );
     lv_tileview_add_element( slv_tile, slv_setup_btn );
     lv_tileview_add_element( slv_tile, slv_progress_lbl );
+    lv_tileview_add_element( slv_tile, slv_prev_btn );
+    lv_tileview_add_element( slv_tile, slv_next_btn );
 
     slv_task = lv_task_create( slv_lv_task, 100, LV_TASK_PRIO_OFF, NULL );
 

@@ -29,6 +29,7 @@ bool slovingo_config_t::onSave( JsonDocument& doc ) {
 
     doc["url"] = url;
     doc["questions"] = questions;
+    doc["name"] = name;
 
     return true;
 }
@@ -45,11 +46,15 @@ bool slovingo_config_t::onLoad( JsonDocument& doc ) {
         count = SLOVINGO_QUESTIONS_MAX;
     questions = count;
 
+    const char *player = doc["name"] | SLOVINGO_DEFAULT_NAME;
+    snprintf( name, sizeof( name ), "%s", *player ? player : SLOVINGO_DEFAULT_NAME );
+
     return true;
 }
 
 bool slovingo_config_t::onDefault( void ) {
     snprintf( url, sizeof( url ), "%s", SLOVINGO_DEFAULT_URL );
     questions = SLOVINGO_QUESTIONS_DEFAULT;
+    snprintf( name, sizeof( name ), "%s", SLOVINGO_DEFAULT_NAME );
     return true;
 }
