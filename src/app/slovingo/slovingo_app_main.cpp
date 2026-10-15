@@ -61,7 +61,8 @@ LV_FONT_DECLARE( slovingo_22px );
  * margins of the text pages, tighter than the theme ones to give the text more room
  */
 #define SLV_SIDE_MARGIN     2       /* px left and right of the text */
-#define SLV_GAP             2       /* px above, below and between the lines */
+#define SLV_GAP             2       /* px above and below the page */
+#define SLV_ITEM_GAP        5       /* px between two blocks (buttons, labels) */
 #define SLV_BTN_PAD_X       4       /* px inside a button, left and right of its text */
 #define SLV_BTN_PAD_Y       2       /* px inside a button, above and below its text */
 
@@ -80,11 +81,14 @@ LV_FONT_DECLARE( slovingo_22px );
 #define TXT_DEFAULT         "Valeur par défaut"
 #define TXT_URL_HELP        "Adresse du dossier du cours (api) :"
 #define TXT_COURSE          "Cours"
+#define TXT_ORDER           "Remets les mots dans l'ordre :"
 
 #define SLV_MAX_GROUPS      32
 #define SLV_MAX_ITEMS       64
 #define SLV_MAX_Q           64
 #define SLV_MAX_CHOICES     4
+#define SLV_MAX_TOKENS      12      /* longest order exercise the watch plays */
+#define SLV_TOKEN_LEN       40
 #define SLV_TEXT_MAX        16384
 
 typedef enum {
@@ -112,12 +116,24 @@ typedef struct {
     uint16_t count;
 } slv_group_t;
 
+typedef enum {
+    SLV_KIND_CHOICE,        /* qcm and fill-blank: tap the right answer */
+    SLV_KIND_ORDER          /* order: tap the words in the right order */
+} slv_kind_t;
+
 typedef struct {
+    slv_kind_t kind;
     char prompt[ 200 ];
     char hint[ 160 ];
     char choice[ SLV_MAX_CHOICES ][ 96 ];
     int choice_cnt;
     int correct;
+    /* order: word[] in the right order, button k shows word[ perm[ k ] ] */
+    char word[ SLV_MAX_TOKENS ][ SLV_TOKEN_LEN ];
+    uint8_t perm[ SLV_MAX_TOKENS ];
+    uint8_t word_cnt;
+    uint8_t picked[ SLV_MAX_TOKENS ];   /* buttons tapped so far, in tap order */
+    uint8_t picked_cnt;
 } slv_question_t;
 
 static slovingo_config_t slovingo_config;
@@ -130,6 +146,7 @@ static lv_obj_t *slv_page = NULL;
 static lv_obj_t *slv_exit_btn = NULL;
 static lv_obj_t *slv_refresh_btn = NULL;
 static lv_obj_t *slv_progress_lbl = NULL;   /* "x/x  Score: n" in the footer, quiz only */
+static lv_obj_t *slv_built_lbl = NULL;      /* order: the sentence built so far, quiz only */
 static lv_obj_t *slv_setup_btn = NULL;
 static lv_obj_t *slv_url_textarea = NULL;
 static lv_task_t *slv_task = NULL;
@@ -342,7 +359,7 @@ static JsonObject slv_cur_sheet_obj( void ) {
 /* exercises the watch can play: qcm and fill-blank (no audio, no drag and drop) */
 static int slv_playable_count( JsonObject sheet ) {
     JsonObject ex = sheet["ex"];
-    return( ex["qcm"].as<int>() + ex["fill-blank"].as<int>() );
+    return( ex["qcm"].as<int>() + ex["fill-blank"].as<int>() + ex["order"].as<int>() );
 }
 
 /* ------------------------------------------------------------------------
@@ -436,13 +453,68 @@ static void slv_q_add_distractors( JsonArray distractors ) {
  * qcm: ask in one language, answer in the other, direction picked at random
  * fill-blank: the target sentence with its missing word hidden
  */
+/*
+ * order: the words of tokens_l2 in a random order, the watch only takes sentences of 2 to SLV_MAX_TOKENS words
+ */
+static void slv_make_order( JsonObject exercise ) {
+    JsonArray tokens = exercise["tokens_l2"];
+    int n = 0;
+
+    slv_q.kind = SLV_KIND_ORDER;
+    slovingo_sanitize( exercise["l1"] | "", slv_q.prompt, sizeof( slv_q.prompt ) );
+    snprintf( slv_q.hint, sizeof( slv_q.hint ), "%s", TXT_ORDER );
+
+    for ( JsonVariant token : tokens ) {
+        if ( n >= SLV_MAX_TOKENS )
+            break;
+        slovingo_sanitize( token.as<const char*>() ? token.as<const char*>() : "", slv_q.word[ n ], SLV_TOKEN_LEN );
+        n++;
+    }
+    slv_q.word_cnt = n;
+
+    for ( int k = 0; k < n; k++ )
+        slv_q.perm[ k ] = k;
+    /* shuffle, and try again if the order came out unchanged */
+    for ( int attempt = 0; attempt < 4; attempt++ ) {
+        for ( int i = n - 1; i > 0; i-- ) {
+            int j = SLV_RAND() % ( i + 1 );
+            uint8_t tmp = slv_q.perm[ i ];
+            slv_q.perm[ i ] = slv_q.perm[ j ];
+            slv_q.perm[ j ] = tmp;
+        }
+        bool identity = true;
+        for ( int k = 0; k < n; k++ ) {
+            if ( slv_q.perm[ k ] != k )
+                identity = false;
+        }
+        if ( !identity )
+            break;
+    }
+}
+
+/* exercise the watch can play */
+static bool slv_is_playable( JsonObject exercise ) {
+    const char *type = exercise["type"] | "";
+
+    if ( !strcmp( type, "qcm" ) || !strcmp( type, "fill-blank" ) )
+        return( true );
+    if ( !strcmp( type, "order" ) ) {
+        JsonArray tokens = exercise["tokens_l2"];
+        return( tokens.size() >= 2 && tokens.size() <= SLV_MAX_TOKENS );
+    }
+    return( false );
+}
+
 static void slv_make_question( int ex_idx ) {
     JsonObject exercise = (*slv_ex)["exercises"][ ex_idx ];
     const char *type = exercise["type"] | "";
 
     memset( &slv_q, 0, sizeof( slv_q ) );
 
-    if ( !strcmp( type, "fill-blank" ) ) {
+    if ( !strcmp( type, "order" ) ) {
+        slv_make_order( exercise );
+    }
+    else if ( !strcmp( type, "fill-blank" ) ) {
         const char *sentence = exercise["l2"] | "";
         const char *missing = exercise["missing_l2"] | "";
         const char *pos = *missing ? strstr( sentence, missing ) : NULL;
@@ -456,7 +528,7 @@ static void slv_make_question( int ex_idx ) {
         slv_q_add_choice( missing );
         slv_q_add_distractors( exercise["choices_l2"] );
     }
-    else {
+    else if ( !strcmp( type, "qcm" ) ) {
         bool to_target = ( SLV_RAND() & 1 ) != 0;
 
         snprintf( slv_q.prompt, sizeof( slv_q.prompt ), "%s", exercise[ to_target ? "l1" : "l2" ] | "" );
@@ -491,8 +563,7 @@ static bool slv_quiz_start( void ) {
 
     JsonArray exercises = (*slv_ex)["exercises"];
     for ( JsonObject exercise : exercises ) {
-        const char *type = exercise["type"] | "";
-        if ( ( !strcmp( type, "qcm" ) || !strcmp( type, "fill-blank" ) ) && total < SLV_MAX_Q )
+        if ( slv_is_playable( exercise ) && total < SLV_MAX_Q )
             slv_q_order[ total++ ] = pos;
         pos++;
     }
@@ -527,6 +598,59 @@ static void slv_answer( int choice ) {
 
     /* no next button: the next question comes by itself, a wrong answer stays on screen a little longer */
     slv_advance_at = lv_tick_get() + ( choice == slv_q.correct ? SLV_ADVANCE_OK_MS : SLV_ADVANCE_KO_MS );
+}
+
+/*
+ * order: the sentence built so far, or the whole right sentence when full is set
+ */
+static void slv_order_text( bool full, lv_color_t color ) {
+    char text[ 256 ] = "";
+    size_t len = 0;
+    int n = full ? slv_q.word_cnt : slv_q.picked_cnt;
+
+    for ( int j = 0; j < n; j++ ) {
+        const char *word = slv_q.word[ full ? j : slv_q.perm[ slv_q.picked[ j ] ] ];
+        size_t wl = strlen( word );
+        if ( len + wl + 2 > sizeof( text ) )
+            break;
+        if ( len )
+            text[ len++ ] = ' ';
+        memcpy( text + len, word, wl );
+        len += wl;
+        text[ len ] = '\0';
+    }
+    lv_label_set_text( slv_built_lbl, text );
+    lv_obj_set_style_local_text_color( slv_built_lbl, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, color );
+}
+
+/*
+ * order: a tapped word leaves the list, the answer is checked when all the words are placed
+ */
+static void slv_order_pick( int k ) {
+    if ( slv_q_answered || k < 0 || k >= slv_q.word_cnt || !slv_built_lbl )
+        return;
+
+    slv_q.picked[ slv_q.picked_cnt++ ] = k;
+    lv_obj_set_hidden( slv_item[ k ], true );
+    slv_order_text( false, lv_color_hex( 0xFFFFFF ) );
+
+    if ( slv_q.picked_cnt < slv_q.word_cnt )
+        return;
+
+    slv_q_answered = true;
+    bool ok = true;
+    for ( int j = 0; j < slv_q.word_cnt; j++ ) {
+        if ( slv_q.perm[ slv_q.picked[ j ] ] != j )
+            ok = false;
+    }
+    if ( ok ) {
+        slv_score++;
+        slv_order_text( false, lv_color_hex( 0x66BB6A ) );
+    }
+    else {
+        slv_order_text( true, lv_color_hex( 0xEF5350 ) );
+    }
+    slv_advance_at = lv_tick_get() + ( ok ? SLV_ADVANCE_OK_MS : SLV_ADVANCE_KO_MS );
 }
 
 static void slv_next_question( void ) {
@@ -653,6 +777,7 @@ static void slv_show( slv_screen_t screen ) {
     slv_advance_at = 0;
     slv_item_cnt = 0;
     slv_url_textarea = NULL;
+    slv_built_lbl = NULL;
     lv_page_clean( slv_page );
 
     lv_obj_set_hidden( slv_refresh_btn, !( screen == SCR_GROUPS || screen == SCR_ERROR ) );
@@ -725,8 +850,15 @@ static void slv_show( slv_screen_t screen ) {
             slv_add_label( slv_q.prompt, true );
             if ( *slv_q.hint )
                 slv_add_label( slv_q.hint, false );
-            for ( int i = 0; i < slv_q.choice_cnt; i++ )
-                slv_add_button( slv_q.choice[ i ] );
+            if ( slv_q.kind == SLV_KIND_ORDER ) {
+                slv_built_lbl = slv_add_label( "", false );
+                for ( int k = 0; k < slv_q.word_cnt; k++ )
+                    slv_add_button( slv_q.word[ slv_q.perm[ k ] ] );
+            }
+            else {
+                for ( int i = 0; i < slv_q.choice_cnt; i++ )
+                    slv_add_button( slv_q.choice[ i ] );
+            }
             break;
 
         case SCR_RESULT:
@@ -804,7 +936,10 @@ static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
                             else
                                 slv_open_data( REQ_EXERCISES );
                             break;
-        case SCR_QUIZ:      slv_answer( item );
+        case SCR_QUIZ:      if ( slv_q.kind == SLV_KIND_ORDER )
+                                slv_order_pick( item );
+                            else
+                                slv_answer( item );
                             break;
         case SCR_RESULT:    if ( item == 0 ) {
                                 if ( slv_quiz_start() )
@@ -944,7 +1079,7 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     lv_obj_set_style_local_pad_right( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, 0 );
     lv_obj_set_style_local_pad_top( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
     lv_obj_set_style_local_pad_bottom( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
-    lv_obj_set_style_local_pad_inner( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
+    lv_obj_set_style_local_pad_inner( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_ITEM_GAP );
 
     slv_exit_btn = wf_add_exit_button( slv_tile, slv_back_event_cb );
     lv_obj_align( slv_exit_btn, slv_tile, LV_ALIGN_IN_BOTTOM_LEFT, THEME_ICON_PADDING, -THEME_ICON_PADDING );
