@@ -62,6 +62,8 @@ LV_FONT_DECLARE( slovingo_22px );
  */
 #define SLV_SIDE_MARGIN     2       /* px left and right of the text */
 #define SLV_GAP             2       /* px above, below and between the lines */
+#define SLV_BTN_PAD_X       4       /* px inside a button, left and right of its text */
+#define SLV_BTN_PAD_Y       2       /* px inside a button, above and below its text */
 
 /*
  * texts of the interface (the course content has its own language)
@@ -228,11 +230,15 @@ static lv_obj_t *slv_add_button( const char *text ) {
     lv_obj_set_width( btn, slv_content_w() );
     lv_btn_set_fit2( btn, LV_FIT_NONE, LV_FIT_TIGHT );
     lv_obj_add_style( btn, LV_BTN_PART_MAIN, ws_get_button_style() );
+    lv_obj_set_style_local_pad_left( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_X );
+    lv_obj_set_style_local_pad_right( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_X );
+    lv_obj_set_style_local_pad_top( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_Y );
+    lv_obj_set_style_local_pad_bottom( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_Y );
     lv_obj_set_event_cb( btn, slv_item_event_cb );
 
     lv_obj_t *label = lv_label_create( btn, NULL );
     lv_label_set_long_mode( label, LV_LABEL_LONG_BREAK );
-    lv_obj_set_width( label, slv_content_w() - 2 * THEME_PADDING );
+    lv_obj_set_width( label, slv_content_w() - 2 * SLV_BTN_PAD_X );
     lv_label_set_align( label, LV_LABEL_ALIGN_CENTER );
     lv_label_set_text( label, buffer );
     lv_obj_add_style( label, LV_LABEL_PART_MAIN, &slv_style16 );
@@ -934,6 +940,8 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     lv_obj_add_style( slv_page, LV_OBJ_PART_MAIN, APP_STYLE );
     lv_page_set_scrlbar_mode( slv_page, LV_SCRLBAR_MODE_DRAG );
     lv_page_set_scrl_layout( slv_page, LV_LAYOUT_COLUMN_MID );
+    lv_obj_set_style_local_pad_left( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_right( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, 0 );
     lv_obj_set_style_local_pad_top( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
     lv_obj_set_style_local_pad_bottom( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
     lv_obj_set_style_local_pad_inner( slv_page, LV_PAGE_PART_SCROLLABLE, LV_STATE_DEFAULT, SLV_GAP );
