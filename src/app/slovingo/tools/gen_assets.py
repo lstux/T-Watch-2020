@@ -18,7 +18,7 @@ https://dejavu-fonts.github.io/License.html).
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 APP_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 TTF = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
@@ -187,98 +187,37 @@ def write_icon(size):
 
 
 # ---------------------------------------------------------------------------
-# mascots: the fox (the player, "Liska") and the rabbit (Andrea), drawn as
-# flat shapes on a transparent background. mood: neutral, happy or sad.
+# mascots: the fox (the player, "Liska") and the rabbit (Andrea).
+# mood: neutral, happy or sad.
 # ---------------------------------------------------------------------------
 
-OUTLINE = (74, 40, 22, 255)
-ORANGE = (240, 124, 36, 255)
-CREAM = (255, 244, 230, 255)
-DARK = (46, 28, 20, 255)
+# The mascots are the ones of the web version (Slovingo engine, _site/mascots/*.svg),
+# rendered once to 512 px PNGs in tools/mascots/ and reduced here: cropped to the
+# drawing, fitted in a square and sharpened a little so the faces stay readable at
+# 40 and 64 px.
+MASCOT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mascots")
+MOODS = {"happy": "content", "sad": "comfort", "neutral": "think"}
 
 
-def _poly(d, big, pts, fill, outline=None, width=0.018):
-    pts = [(x * big, y * big) for x, y in pts]
-    d.polygon(pts, fill=fill)
-    if outline:
-        d.line(pts + [pts[0]], fill=outline, width=int(big * width), joint="curve")
-
-
-def _eyes(d, big, mood, xs=(0.33, 0.67), y=0.50, r=0.045):
-    for i, x in enumerate(xs):
-        cx, cy = x * big, y * big
-        if mood == "happy":
-            # closed, smiling eyes: an arc open to the bottom
-            d.arc((cx - r * big * 1.3, cy - r * big * 0.9, cx + r * big * 1.3, cy + r * big * 1.5), 200, 340, fill=DARK, width=int(big * 0.03))
-        else:
-            d.ellipse((cx - r * big, cy - r * big * 1.2, cx + r * big, cy + r * big * 1.2), fill=DARK)
-            d.ellipse((cx - r * big * 0.1, cy - r * big * 0.8, cx + r * big * 0.5, cy - r * big * 0.1), fill=(255, 255, 255, 255))
-        if mood == "sad":
-            # brows slanted up towards the middle, and a tear on the left eye
-            sign = 1 if i == 0 else -1
-            d.line((cx - sign * r * big * 1.6, cy - r * big * 2.4, cx + sign * r * big * 1.6, cy - r * big * 3.4), fill=DARK, width=int(big * 0.025))
-    if mood == "sad":
-        tx, ty = xs[0] * big - r * big * 0.5, y * big + r * big * 1.8
-        d.ellipse((tx - big * 0.022, ty, tx + big * 0.022, ty + big * 0.07), fill=(120, 190, 255, 255))
-
-
-def _mouth(d, big, mood, cx=0.5, y=0.80):
-    w = big * 0.10
-    if mood == "happy":
-        d.arc((cx * big - w, y * big - w * 0.6, cx * big + w, y * big + w * 0.9), 20, 160, fill=DARK, width=int(big * 0.025))
-    elif mood == "sad":
-        d.arc((cx * big - w * 0.8, y * big + w * 0.2, cx * big + w * 0.8, y * big + w * 1.4), 200, 340, fill=DARK, width=int(big * 0.025))
-    else:
-        d.line((cx * big - w * 0.5, y * big + w * 0.3, cx * big + w * 0.5, y * big + w * 0.3), fill=DARK, width=int(big * 0.022))
+def _mascot(animal, mood, size):
+    src = Image.open(os.path.join(MASCOT_DIR, "%s-%s.png" % (animal, MOODS[mood]))).convert("RGBA")
+    src = src.crop(src.getbbox())
+    scale = size / max(src.size)
+    w, h = max(1, round(src.width * scale)), max(1, round(src.height * scale))
+    # work on premultiplied colours so the transparent edge does not darken the outline
+    small = src.convert("RGBa").resize((w, h), Image.LANCZOS).convert("RGBA")
+    small = small.filter(ImageFilter.UnsharpMask(radius=0.6, percent=60, threshold=0))
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    img.alpha_composite(small, ((size - w) // 2, size - h if animal == "rabbit" else (size - h) // 2))
+    return img
 
 
 def draw_fox(mood, size):
-    big = size * 8
-    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    # ears, then the head over their base
-    for mirror in (False, True):
-        m = (lambda x: 1 - x) if mirror else (lambda x: x)
-        _poly(d, big, [(m(0.10), 0.50), (m(0.13), 0.05), (m(0.45), 0.32)], ORANGE, OUTLINE)
-        _poly(d, big, [(m(0.17), 0.30), (m(0.19), 0.13), (m(0.33), 0.30)], DARK)
-    _poly(d, big, [(0.07, 0.50), (0.20, 0.30), (0.36, 0.26), (0.64, 0.26), (0.80, 0.30), (0.93, 0.50), (0.50, 0.95)], ORANGE, OUTLINE)
-    # white cheeks and muzzle
-    _poly(d, big, [(0.10, 0.56), (0.27, 0.64), (0.50, 0.68), (0.73, 0.64), (0.90, 0.56), (0.50, 0.94)], CREAM)
-    d.polygon([(0.45 * big, 0.67 * big), (0.55 * big, 0.67 * big), (0.50 * big, 0.74 * big)], fill=DARK)
-    _eyes(d, big, mood)
-    # mouth on the cheeks, around the nose
-    w = int(big * 0.025)
-    if mood == "happy":
-        d.arc((0.38 * big, 0.62 * big, 0.62 * big, 0.82 * big), 20, 160, fill=DARK, width=w)
-    elif mood == "sad":
-        d.arc((0.41 * big, 0.80 * big, 0.59 * big, 0.92 * big), 200, 340, fill=DARK, width=w)
-    else:
-        d.line((0.50 * big, 0.74 * big, 0.50 * big, 0.79 * big), fill=DARK, width=w)
-        d.line((0.44 * big, 0.80 * big, 0.56 * big, 0.80 * big), fill=DARK, width=w)
-    return img.resize((size, size), Image.LANCZOS)
+    return _mascot("fox", mood, size)
 
 
 def draw_rabbit(mood, size):
-    big = size * 8
-    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    fur = (244, 244, 248, 255)
-    edge = (110, 110, 130, 255)
-    pink = (255, 170, 190, 255)
-    for x0 in (0.20, 0.57):
-        d.ellipse((x0 * big, 0.01 * big, (x0 + 0.23) * big, 0.58 * big), fill=fur, outline=edge, width=int(big * 0.018))
-        d.ellipse(((x0 + 0.05) * big, 0.07 * big, (x0 + 0.18) * big, 0.50 * big), fill=pink)
-    d.ellipse((0.10 * big, 0.36 * big, 0.90 * big, 0.96 * big), fill=fur, outline=edge, width=int(big * 0.018))
-    _eyes(d, big, mood, xs=(0.34, 0.66), y=0.62)
-    d.polygon([(0.45 * big, 0.73 * big), (0.55 * big, 0.73 * big), (0.50 * big, 0.79 * big)], fill=pink)
-    _mouth(d, big, mood, y=0.80)
-    if mood == "happy":
-        d.rectangle((0.465 * big, 0.88 * big, 0.495 * big, 0.935 * big), fill=(255, 255, 255, 255), outline=edge, width=int(big * 0.008))
-        d.rectangle((0.505 * big, 0.88 * big, 0.535 * big, 0.935 * big), fill=(255, 255, 255, 255), outline=edge, width=int(big * 0.008))
-    for sign in (-1, 1):
-        for dy in (-0.02, 0.03):
-            d.line((0.50 * big + sign * 0.12 * big, (0.77 + dy) * big, 0.50 * big + sign * 0.36 * big, (0.74 + dy * 2) * big), fill=edge, width=int(big * 0.008))
-    return img.resize((size, size), Image.LANCZOS)
+    return _mascot("rabbit", mood, size)
 
 
 # (name, drawing function, mood, size)
