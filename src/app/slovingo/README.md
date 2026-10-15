@@ -48,7 +48,10 @@ Series list -> sheets -> *read* the sheet, or play its exercises.
   by itself after an answer, the progress and score are in the footer.
 - **Mascots**: the fox (the player) sits in the footer of the quiz and smiles or cries
   at the answers, the watch buzzes a little (when "vibe feedback" is on); the result
-  screen cheers with a Slovak word, the fox, and the rabbit from 70 %.
+  screen shows the fox, the rabbit from 70 %, and a little phrase of the course with its
+  translation, drawn at random in the tier of the score (the `cheers` of `index.json`: perfect
+  = 100 %, great from 90, good from 70, ok from 50, retry below). A course without `cheers`
+  shows no phrase (see `docs/Lang-json.md` of the Slovingo engine).
 - `[USER_NAME]` in the course is replaced by `name` of the config.
 - **Standby**: while a quiz, the result or a sheet is shown, the watch does not jump back
   to the main tile when the screen goes off (the "block return to main tile" setting is

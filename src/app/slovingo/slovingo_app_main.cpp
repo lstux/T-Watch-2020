@@ -221,6 +221,9 @@ static int slv_q_cnt = 0;
 static int slv_q_pos = 0;
 static int slv_score = 0;
 static bool slv_q_answered = false;
+/* end of the series: a little phrase of the course ("cheers" of index.json) drawn once per result */
+static char slv_cheer_text[ 80 ];
+static char slv_cheer_trans[ 80 ];
 /* lv_tick time when the next question is shown after an answer, 0 = nothing scheduled */
 static uint32_t slv_advance_at = 0;
 /* the watch goes back to the main tile when the screen goes off, unless the display setting "block maintile" is on */
@@ -1191,9 +1194,33 @@ static void slv_order_pick( int k ) {
     slv_advance_at = lv_tick_get() + ( ok ? SLV_ADVANCE_OK_MS : SLV_ADVANCE_KO_MS );
 }
 
+/*
+ * one of the phrases the course gives for the score: tier perfect (100 %), great (90),
+ * good (70), ok (50) or retry, one picked at random. A course without "cheers" gives nothing.
+ */
+static void slv_pick_cheer( void ) {
+    int pct = slv_q_cnt ? slv_score * 100 / slv_q_cnt : 0;
+    const char *tier = pct >= 100 ? "perfect" : ( pct >= 90 ? "great" : ( pct >= 70 ? "good" : ( pct >= 50 ? "ok" : "retry" ) ) );
+
+    slv_cheer_text[ 0 ] = '\0';
+    slv_cheer_trans[ 0 ] = '\0';
+    if ( !slv_index )
+        return;
+
+    JsonArray list = (*slv_index)["cheers"][ tier ];
+    size_t cnt = list.size();
+    if ( !cnt )
+        return;
+
+    JsonObject cheer = list[ SLV_RAND() % cnt ];
+    slovingo_sanitize( cheer["t"] | "", slv_cheer_text, sizeof( slv_cheer_text ) );
+    slovingo_sanitize( cheer["n"] | "", slv_cheer_trans, sizeof( slv_cheer_trans ) );
+}
+
 static void slv_next_question( void ) {
     slv_q_pos++;
     if ( slv_q_pos >= slv_q_cnt ) {
+        slv_pick_cheer();
         slv_goto( SCR_RESULT );
         return;
     }
@@ -1449,13 +1476,15 @@ static void slv_show( slv_screen_t screen ) {
 
         case SCR_RESULT: {
             int pct = slv_q_cnt ? slv_score * 100 / slv_q_cnt : 0;
-            const char *sk = pct >= 90 ? "V\xC3\xBD" "borne!" : ( pct >= 70 ? "Super!" : ( pct >= 50 ? "Dobre!" : "Sk\xC3\xBAs znova!" ) );
-            const char *fr = pct >= 90 ? "Excellent !" : ( pct >= 70 ? "Bravo !" : ( pct >= 50 ? "Pas mal !" : "Essaie encore !" ) );
 
             slv_add_mascots( pct );
-            lv_obj_t *cheer = slv_add_label( sk, true );
-            lv_obj_set_style_local_text_color( cheer, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( pct >= 50 ? 0xFFB74D : SLV_COLOR_DIM ) );
-            snprintf( text, sizeof( text ), "%s  Score : %d / %d", fr, slv_score, slv_q_cnt );
+            if ( *slv_cheer_text ) {
+                lv_obj_t *cheer = slv_add_label( slv_cheer_text, true );
+                lv_obj_set_style_local_text_color( cheer, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( pct >= 50 ? 0xFFB74D : SLV_COLOR_DIM ) );
+                if ( *slv_cheer_trans )
+                    slv_add_label( slv_cheer_trans, false );
+            }
+            snprintf( text, sizeof( text ), "Score : %d / %d", slv_score, slv_q_cnt );
             slv_add_label( text, false );
             slv_add_button( TXT_AGAIN );
             slv_add_button( TXT_BACK );
