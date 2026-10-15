@@ -27,6 +27,8 @@
     #define SLOVINGO_URL_LEN            160
     #define SLOVINGO_QUESTIONS_DEFAULT  10
     #define SLOVINGO_QUESTIONS_MAX      30
+    #define SLOVINGO_NAME_LEN           24
+    #define SLOVINGO_DEFAULT_NAME       "L\xC3\xAD\xC5\xA1ka"      /** @brief "Liska" (fox), what [USER_NAME] stands for in the course */
 
     /**
      * @brief slovingo config structure
@@ -38,6 +40,8 @@
         char url[ SLOVINGO_URL_LEN ] = SLOVINGO_DEFAULT_URL;
         /** @brief questions per exercise session */
         uint8_t questions = SLOVINGO_QUESTIONS_DEFAULT;
+        /** @brief name of the player, shown where the course has [USER_NAME] */
+        char name[ SLOVINGO_NAME_LEN ] = SLOVINGO_DEFAULT_NAME;
 
         protected:
         ////////////// Available for overloading: //////////////

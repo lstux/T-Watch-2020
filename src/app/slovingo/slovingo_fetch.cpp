@@ -201,6 +201,17 @@ const char *slovingo_result_text( slovingo_result_t result ) {
     return( "Erreur" );
 }
 
+/* "Liska", until the config says otherwise */
+static char slovingo_user_name[ 32 ] = "L\xC3\xAD\xC5\xA1ka";
+
+void slovingo_set_user_name( const char *name ) {
+    char clean[ sizeof( slovingo_user_name ) ];
+
+    slovingo_sanitize( name ? name : "", clean, sizeof( clean ) );
+    if ( *clean )
+        memcpy( slovingo_user_name, clean, sizeof( clean ) );
+}
+
 void slovingo_sanitize( const char *in, char *out, size_t out_size ) {
     const uint8_t *p = (const uint8_t*)in;
     size_t o = 0;
@@ -211,6 +222,16 @@ void slovingo_sanitize( const char *in, char *out, size_t out_size ) {
     while ( *p ) {
         uint32_t cp;
         int len;
+
+        if ( *p == '[' && !strncmp( (const char*)p, "[USER_NAME]", 11 ) ) {
+            size_t n = strlen( slovingo_user_name );
+            if ( o + n + 1 > out_size )
+                break;
+            memcpy( out + o, slovingo_user_name, n );
+            o += n;
+            p += 11;
+            continue;
+        }
 
         if ( *p < 0x80 )                    { cp = *p;        len = 1; }
         else if ( ( *p & 0xE0 ) == 0xC0 )   { cp = *p & 0x1F; len = 2; }

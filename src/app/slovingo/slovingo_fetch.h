@@ -67,4 +67,9 @@
      */
     void slovingo_sanitize( const char *in, char *out, size_t out_size );
 
+    /**
+     * @brief   set the name the course's [USER_NAME] is replaced with by slovingo_sanitize()
+     */
+    void slovingo_set_user_name( const char *name );
+
 #endif // _SLOVINGO_FETCH_H

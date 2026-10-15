@@ -26,15 +26,25 @@ the app (setup button, bottom right).
 |-------------|----------------------------------------------------------|------------------------------|
 | `url`       | `https://lstux.github.io/Slovingo-sk-fr-kids/api/` | folder of the course export  |
 | `questions` | `10`                                                     | questions per exercise round |
+| `name`      | `Líška`                                                  | name of the player, shown where the course has `[USER_NAME]` |
 
 ## What it does
 
-Series list -> sheets -> *read* the sheet, or play its exercises (multiple choice and
-fill-in-the-blank, answers shuffled, score at the end).
+Series list -> sheets -> *read* the sheet, or play its exercises.
 
-Not on the watch: audio (`listen` exercises), images, matching and word-ordering exercises.
+- **Reading** goes page by page, the arrows in the footer turn the pages. Text blocks are
+  put together, dialogue lines show who speaks (coloured name) with the translation under
+  the line and the word by word glosses on a tap, and vocabulary tables become cards
+  (word, then sound and meaning; a tap shows or hides the translation, a button hides all
+  of them to test yourself).
+- **Exercises**: multiple choice, fill-in-the-blank and word ordering (the words of the
+  sentence plus one or two that do not belong, tap them in order). The next question comes
+  by itself after an answer, the progress and score are in the footer.
+- `[USER_NAME]` in the course is replaced by `name` of the config.
+
+Not on the watch: audio (`listen` exercises), images and matching exercises.
 Emojis and typographic symbols outside the font are dropped or replaced by ASCII
-(`slovingo_sanitize()`).
+(`slovingo_sanitize()`); the emoji of a speaker is replaced by a name.
 
 ## Fonts and icon
 
