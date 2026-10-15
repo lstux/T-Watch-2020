@@ -32,6 +32,7 @@
 #ifndef NATIVE_64BIT
     #include <Arduino.h>
     #include <esp_system.h>
+    #include "hardware/motor.h"
 #endif
 
 #include "slovingo_app.h"
@@ -50,6 +51,14 @@
 
 LV_FONT_DECLARE( slovingo_16px );
 LV_FONT_DECLARE( slovingo_22px );
+
+/* the fox (the player) and the rabbit, see tools/gen_assets.py */
+LV_IMG_DECLARE( slv_fox_neutral_40 );
+LV_IMG_DECLARE( slv_fox_happy_40 );
+LV_IMG_DECLARE( slv_fox_sad_40 );
+LV_IMG_DECLARE( slv_fox_happy_64 );
+LV_IMG_DECLARE( slv_fox_sad_64 );
+LV_IMG_DECLARE( slv_rabbit_happy_64 );
 
 #ifdef NATIVE_64BIT
     #define SLV_RAND()      ( (uint32_t)rand() )
@@ -154,6 +163,7 @@ static lv_obj_t *slv_exit_btn = NULL;
 static lv_obj_t *slv_refresh_btn = NULL;
 static lv_obj_t *slv_progress_lbl = NULL;   /* "x/x  Score: n" in the footer, quiz only */
 static lv_obj_t *slv_built_lbl = NULL;      /* order: the sentence built so far, quiz only */
+static lv_obj_t *slv_mascot = NULL;         /* the fox in the footer of the quiz, reacts to the answers */
 static lv_obj_t *slv_setup_btn = NULL;
 static lv_obj_t *slv_prev_btn = NULL;       /* reader: previous and next page */
 static lv_obj_t *slv_next_btn = NULL;
@@ -1082,6 +1092,26 @@ static bool slv_quiz_start( void ) {
     return( true );
 }
 
+typedef enum {
+    MOOD_NEUTRAL,
+    MOOD_HAPPY,
+    MOOD_SAD
+} slv_mood_t;
+
+static void slv_set_mood( slv_mood_t mood ) {
+    static const lv_img_dsc_t *const fox[] = { &slv_fox_neutral_40, &slv_fox_happy_40, &slv_fox_sad_40 };
+
+    lv_img_set_src( slv_mascot, fox[ mood ] );
+}
+
+/* the fox smiles or cries, and the watch buzzes a little (when the vibe feedback is on) */
+static void slv_feedback( bool ok ) {
+    slv_set_mood( ok ? MOOD_HAPPY : MOOD_SAD );
+#ifndef NATIVE_64BIT
+    motor_vibe( ok ? 4 : 20 );
+#endif
+}
+
 static void slv_answer( int choice ) {
     if ( slv_q_answered || choice < 0 || choice >= slv_q.choice_cnt )
         return;
@@ -1095,6 +1125,7 @@ static void slv_answer( int choice ) {
         lv_obj_set_style_local_bg_color( slv_item[ choice ], LV_BTN_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( 0xC62828 ) );
 
     /* no next button: the next question comes by itself, a wrong answer stays on screen a little longer */
+    slv_feedback( choice == slv_q.correct );
     slv_advance_at = lv_tick_get() + ( choice == slv_q.correct ? SLV_ADVANCE_OK_MS : SLV_ADVANCE_KO_MS );
 }
 
@@ -1148,6 +1179,7 @@ static void slv_order_pick( int k ) {
     else {
         slv_order_text( true, lv_color_hex( 0xEF5350 ) );
     }
+    slv_feedback( ok );
     slv_advance_at = lv_tick_get() + ( ok ? SLV_ADVANCE_OK_MS : SLV_ADVANCE_KO_MS );
 }
 
@@ -1269,6 +1301,28 @@ static void slv_goto( slv_screen_t screen ) {
     slv_pending = true;
 }
 
+/*
+ * result screen: the fox is happy from half of the answers right, the rabbit joins
+ * the party from 70 %
+ */
+static void slv_add_mascots( int pct ) {
+    lv_obj_t *row = lv_cont_create( slv_page, NULL );
+
+    lv_cont_set_layout( row, LV_LAYOUT_ROW_MID );
+    lv_cont_set_fit( row, LV_FIT_TIGHT );
+    lv_obj_set_style_local_bg_opa( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP );
+    lv_obj_set_style_local_border_width( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_all( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_inner( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 6 );
+
+    lv_obj_t *fox = lv_img_create( row, NULL );
+    lv_img_set_src( fox, pct >= 50 ? &slv_fox_happy_64 : &slv_fox_sad_64 );
+    if ( pct >= 70 ) {
+        lv_obj_t *rabbit = lv_img_create( row, NULL );
+        lv_img_set_src( rabbit, &slv_rabbit_happy_64 );
+    }
+}
+
 static void slv_show( slv_screen_t screen ) {
     char text[ 160 ];
 
@@ -1283,6 +1337,7 @@ static void slv_show( slv_screen_t screen ) {
     lv_obj_set_hidden( slv_refresh_btn, !( screen == SCR_GROUPS || screen == SCR_ERROR ) );
     lv_obj_set_hidden( slv_setup_btn, screen != SCR_GROUPS );
     lv_obj_set_hidden( slv_progress_lbl, !( screen == SCR_QUIZ || screen == SCR_READER ) );
+    lv_obj_set_hidden( slv_mascot, screen != SCR_QUIZ );
     lv_obj_set_hidden( slv_prev_btn, screen != SCR_READER );
     lv_obj_set_hidden( slv_next_btn, screen != SCR_READER );
     memset( slv_rd_more, 0, sizeof( slv_rd_more ) );
@@ -1334,6 +1389,7 @@ static void slv_show( slv_screen_t screen ) {
             break;
 
         case SCR_QUIZ:
+            slv_set_mood( MOOD_NEUTRAL );
             snprintf( text, sizeof( text ), "%d/%d  Score: %d", slv_q_pos + 1, slv_q_cnt, slv_score );
             lv_label_set_text( slv_progress_lbl, text );
             slv_add_label( slv_q.prompt, true );
@@ -1363,12 +1419,20 @@ static void slv_show( slv_screen_t screen ) {
             }
             break;
 
-        case SCR_RESULT:
-            snprintf( text, sizeof( text ), "Score : %d / %d", slv_score, slv_q_cnt );
-            slv_add_label( text, true );
+        case SCR_RESULT: {
+            int pct = slv_q_cnt ? slv_score * 100 / slv_q_cnt : 0;
+            const char *sk = pct >= 90 ? "V\xC3\xBD" "borne!" : ( pct >= 70 ? "Super!" : ( pct >= 50 ? "Dobre!" : "Sk\xC3\xBAs znova!" ) );
+            const char *fr = pct >= 90 ? "Excellent !" : ( pct >= 70 ? "Bravo !" : ( pct >= 50 ? "Pas mal !" : "Essaie encore !" ) );
+
+            slv_add_mascots( pct );
+            lv_obj_t *cheer = slv_add_label( sk, true );
+            lv_obj_set_style_local_text_color( cheer, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( pct >= 50 ? 0xFFB74D : SLV_COLOR_DIM ) );
+            snprintf( text, sizeof( text ), "%s  Score : %d / %d", fr, slv_score, slv_q_cnt );
+            slv_add_label( text, false );
             slv_add_button( TXT_AGAIN );
             slv_add_button( TXT_BACK );
             break;
+        }
 
         case SCR_SETUP:
             slv_add_label( TXT_URL_HELP, false );
@@ -1605,10 +1669,16 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     /* quiz progress, right of the exit arrow (same row, the refresh button is hidden in the quiz) */
     slv_progress_lbl = lv_label_create( slv_tile, NULL );
     lv_label_set_long_mode( slv_progress_lbl, LV_LABEL_LONG_CROP );
-    lv_obj_set_width( slv_progress_lbl, hor_res - 2 * THEME_ICON_SIZE - 2 * THEME_ICON_PADDING );
+    lv_obj_set_width( slv_progress_lbl, hor_res - 2 * THEME_ICON_SIZE - 3 * THEME_ICON_PADDING );
     lv_obj_add_style( slv_progress_lbl, LV_LABEL_PART_MAIN, &slv_style16 );
     lv_obj_align( slv_progress_lbl, slv_exit_btn, LV_ALIGN_OUT_RIGHT_MID, THEME_PADDING, 0 );
     lv_obj_set_hidden( slv_progress_lbl, true );
+
+    /* the fox of the quiz, right of the footer where the other buttons are hidden */
+    slv_mascot = lv_img_create( slv_tile, NULL );
+    lv_img_set_src( slv_mascot, &slv_fox_neutral_40 );
+    lv_obj_align( slv_mascot, slv_tile, LV_ALIGN_IN_BOTTOM_RIGHT, -THEME_ICON_PADDING, -THEME_ICON_PADDING );
+    lv_obj_set_hidden( slv_mascot, true );
 
     /* reader: next page at the right of the footer, previous page left of it, the page counter sits right of the exit arrow */
     slv_next_btn = lv_btn_create( slv_tile, NULL );
