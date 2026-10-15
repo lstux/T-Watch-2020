@@ -425,6 +425,7 @@ static int slv_playable_count( JsonObject sheet ) {
 #define SLV_COLOR_DIM       0xA0A7B0
 #define SLV_COLOR_GLOSS     0x8AB4F8
 #define SLV_COLOR_CARD      0x23272E
+#define SLV_COLOR_BUBBLE_ME 0x3A3326   /* the player's bubbles in the dialogues */
 #define SLV_EMOJI_FOX       "\xF0\x9F\xA6\x8A"
 
 typedef enum {
@@ -643,6 +644,15 @@ static int slv_spk_of( const char *emoji ) {
     return( found >= 0 ? found : slv_spk_add( emoji, slv_spk_default( emoji ) ) );
 }
 
+/* chat side: the player (the fox) speaks on the right; without it the speakers alternate */
+static bool slv_spk_right( int spk ) {
+    if ( spk < 0 )
+        return( false );
+    if ( slv_spk_find( SLV_EMOJI_FOX ) >= 0 )
+        return( !strcmp( slv_spk[ spk ].emoji, SLV_EMOJI_FOX ) );
+    return( spk % 2 == 1 );
+}
+
 static uint32_t slv_spk_color( int spk ) {
     static const uint32_t palette[] = { 0x64B5F6, 0x81C784, 0xBA68C8, 0xF06292, 0x4DD0E1, 0xFFF176, 0xA1887F, 0x90A4AE };
 
@@ -654,15 +664,15 @@ static uint32_t slv_spk_color( int spk ) {
 /*
  * a card: a rounded box that can be tapped, filled with labels by the caller
  */
-static lv_obj_t *slv_add_card( void ) {
-    lv_obj_t *card = lv_cont_create( slv_page, NULL );
+static lv_obj_t *slv_add_card_in( lv_obj_t *parent, lv_coord_t width, uint32_t bg, lv_coord_t radius ) {
+    lv_obj_t *card = lv_cont_create( parent, NULL );
 
     lv_cont_set_layout( card, LV_LAYOUT_COLUMN_LEFT );
     lv_cont_set_fit2( card, LV_FIT_NONE, LV_FIT_TIGHT );
-    lv_obj_set_width( card, slv_content_w() );
-    lv_obj_set_style_local_bg_color( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( SLV_COLOR_CARD ) );
+    lv_obj_set_width( card, width );
+    lv_obj_set_style_local_bg_color( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( bg ) );
     lv_obj_set_style_local_bg_opa( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER );
-    lv_obj_set_style_local_radius( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 6 );
+    lv_obj_set_style_local_radius( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, radius );
     lv_obj_set_style_local_border_width( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
     lv_obj_set_style_local_pad_left( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, SLV_CARD_PAD );
     lv_obj_set_style_local_pad_right( card, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, SLV_CARD_PAD );
@@ -677,13 +687,48 @@ static lv_obj_t *slv_add_card( void ) {
     return( card );
 }
 
+static lv_obj_t *slv_add_card( void ) {
+    return( slv_add_card_in( slv_page, slv_content_w(), SLV_COLOR_CARD, 6 ) );
+}
+
+/*
+ * a chat bubble: a card of 86 % of the width, at the left or at the right of the page.
+ * The page lays its children out in a centred column, so the bubble sits in a row
+ * as wide as the page, with an empty spacer on its left when it goes to the right.
+ */
+static lv_obj_t *slv_add_bubble( bool right, uint32_t bg ) {
+    lv_coord_t full = slv_content_w();
+    lv_coord_t width = full * 86 / 100;
+    lv_obj_t *row = lv_cont_create( slv_page, NULL );
+
+    lv_cont_set_layout( row, LV_LAYOUT_ROW_TOP );
+    lv_cont_set_fit2( row, LV_FIT_NONE, LV_FIT_TIGHT );
+    lv_obj_set_width( row, full );
+    lv_obj_set_style_local_bg_opa( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP );
+    lv_obj_set_style_local_border_width( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_all( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_style_local_pad_inner( row, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+    lv_obj_set_click( row, false );
+    lv_obj_set_drag_parent( row, true );
+
+    if ( right ) {
+        lv_obj_t *spacer = lv_obj_create( row, NULL );
+        lv_obj_set_size( spacer, full - width, 1 );
+        lv_obj_set_style_local_bg_opa( spacer, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP );
+        lv_obj_set_style_local_border_width( spacer, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0 );
+        lv_obj_set_click( spacer, false );
+        lv_obj_set_drag_parent( spacer, true );
+    }
+    return( slv_add_card_in( row, width, bg, 10 ) );
+}
+
 /* label in a card, text already cleaned up, recolor gives "#RRGGBB text#" its colour */
 static lv_obj_t *slv_card_label( lv_obj_t *card, const char *text, bool big, uint32_t color, bool recolor ) {
     lv_obj_t *label = lv_label_create( card, NULL );
 
     lv_label_set_long_mode( label, LV_LABEL_LONG_BREAK );
     lv_label_set_recolor( label, recolor );
-    lv_obj_set_width( label, slv_content_w() - 2 * SLV_CARD_PAD );
+    lv_obj_set_width( label, lv_obj_get_width( card ) - 2 * SLV_CARD_PAD );
     lv_obj_add_style( label, LV_LABEL_PART_MAIN, big ? &slv_style22 : &slv_style16 );
     lv_obj_set_style_local_text_color( label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( color ) );
     lv_label_set_text( label, text );
@@ -715,9 +760,10 @@ static void slv_append( char *dst, size_t cap, const char *text ) {
 static void slv_reader_card( JsonObject block ) {
     char text[ 512 ];
     char piece[ 256 ];
-    lv_obj_t *card = slv_add_card();
-    int item = slv_item_cnt - 1;
     int spk = slv_spk_of( block["s"] | "" );
+    bool right = slv_spk_right( spk );
+    lv_obj_t *card = slv_add_bubble( right, right ? SLV_COLOR_BUBBLE_ME : SLV_COLOR_CARD );
+    int item = slv_item_cnt - 1;
     bool named = spk >= 0 && *slv_spk[ spk ].name;
 
     slv_clean( block["x"] | "", piece, sizeof( piece ) );
