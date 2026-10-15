@@ -3,7 +3,7 @@
  *
  *   One tile, one scrollable page that is rebuilt for every screen:
  *   groups -> sheets -> sheet (read / exercises) -> reader | quiz -> result.
- *   The data comes from the export of src/watch_export.py (index.json,
+ *   The data comes from the export of src/export_api.py (index.json,
  *   sheets/<id>.json, exercises/<id>.json), downloaded by a worker task
  *   and cached in the SPIFFS, see slovingo_fetch.cpp.
  ****************************************************************************/
@@ -69,7 +69,7 @@ LV_FONT_DECLARE( slovingo_22px );
 #define TXT_BACK            "Retour"
 #define TXT_SAVE            "Enregistrer"
 #define TXT_DEFAULT         "Valeur par défaut"
-#define TXT_URL_HELP        "Adresse du dossier du cours (dist-watch) :"
+#define TXT_URL_HELP        "Adresse du dossier du cours (api) :"
 #define TXT_COURSE          "Cours"
 
 #define SLV_MAX_GROUPS      32

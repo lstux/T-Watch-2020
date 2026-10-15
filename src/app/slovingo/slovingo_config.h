@@ -23,7 +23,7 @@
     #include "utils/basejsonconfig.h"
 
     #define SLOVINGO_JSON_CONFIG_FILE   "/slovingo.json"    /** @brief defines json config file name */
-    #define SLOVINGO_DEFAULT_URL        "https://lstux.github.io/Slovingo-sk-fr-kids/dist-watch/"
+    #define SLOVINGO_DEFAULT_URL        "https://lstux.github.io/Slovingo-sk-fr-kids/api/"
     #define SLOVINGO_URL_LEN            160
     #define SLOVINGO_QUESTIONS_DEFAULT  10
     #define SLOVINGO_QUESTIONS_MAX      30
@@ -34,7 +34,7 @@
     class slovingo_config_t : public BaseJsonConfig {
         public:
         slovingo_config_t();
-        /** @brief folder of the course export (output of src/watch_export.py), index.json lives in it */
+        /** @brief folder of the course export (output of src/export_api.py), index.json lives in it */
         char url[ SLOVINGO_URL_LEN ] = SLOVINGO_DEFAULT_URL;
         /** @brief questions per exercise session */
         uint8_t questions = SLOVINGO_QUESTIONS_DEFAULT;

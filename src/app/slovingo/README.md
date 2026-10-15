@@ -5,7 +5,7 @@ engine and lets you read its sheets and practise on the watch.
 
 ## Data
 
-The app needs the compact export of a course (`src/watch_export.py`, branch `feat/t-watch`
+The app needs the compact export of a course (`src/export_api.py`, branch `feat/t-watch`
 of Slovingo), served over http(s) from a folder:
 
 ```
@@ -24,7 +24,7 @@ the app (setup button, bottom right).
 
 | key         | default                                                  | meaning                      |
 |-------------|----------------------------------------------------------|------------------------------|
-| `url`       | `https://lstux.github.io/Slovingo-sk-fr-kids/dist-watch/` | folder of the course export  |
+| `url`       | `https://lstux.github.io/Slovingo-sk-fr-kids/api/` | folder of the course export  |
 | `questions` | `10`                                                     | questions per exercise round |
 
 ## What it does
