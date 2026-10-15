@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the LVGL 7 assets of the Slovingo app (fonts and icon).
+"""Generate the LVGL 7 assets of the Slovingo app (fonts, icon and mascots).
 
 lv_font_conv is not needed: the font is written straight from a TTF with
 Pillow (FreeType) in the plain lv_font_fmt_txt format (no kerning, no
@@ -117,23 +117,29 @@ def write_font(size):
 
 
 def draw_icon(size):
+    """The fox (happy) on the blue of the Slovak flag, with a small speech bubble."""
     big = size * 8
     img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((big * 0.04, big * 0.04, big * 0.96, big * 0.96), radius=big * 0.22, fill=(11, 78, 162, 255))
-    # Slovak flag stripes along the bottom, under a white speech bubble
-    d.rounded_rectangle((big * 0.16, big * 0.14, big * 0.84, big * 0.66), radius=big * 0.14, fill=(255, 255, 255, 255))
-    d.polygon([(big * 0.30, big * 0.62), (big * 0.30, big * 0.82), (big * 0.52, big * 0.62)], fill=(255, 255, 255, 255))
-    font = ImageFont.truetype(TTF_BOLD, int(big * 0.42))
-    d.text((big * 0.50, big * 0.40), "S", fill=(11, 78, 162, 255), font=font, anchor="mm")
-    d.rectangle((big * 0.62, big * 0.74, big * 0.88, big * 0.78), fill=(238, 28, 37, 255))
-    return img.resize((size, size), Image.LANCZOS)
+    # tricolour band at the bottom: white, blue, red
+    band = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(band)
+    bd.rectangle((0, big * 0.80, big, big * 0.853), fill=(255, 255, 255, 255))
+    bd.rectangle((0, big * 0.853, big, big * 0.906), fill=(40, 110, 210, 255))
+    bd.rectangle((0, big * 0.906, big, big), fill=(238, 28, 37, 255))
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((big * 0.04, big * 0.04, big * 0.96, big * 0.96), radius=big * 0.22, fill=255)
+    img.paste(band, (0, 0), Image.composite(band.split()[3], Image.new("L", (big, big), 0), mask))
+    icon = img.resize((size, size), Image.LANCZOS)
+    fox = draw_fox("happy", int(size * 0.74))
+    icon.alpha_composite(fox, ((size - fox.width) // 2, int(size * 0.07)))
+    return icon
 
 
-def write_icon(size):
-    name = "slovingo_%dpx" % size
-    img = draw_icon(size)
+def write_image(name, img):
     px = list(img.get_flattened_data())
+    size_w, size_h = img.size
 
     def fmt8(r, g, b, a):
         return [(r >> 5) << 5 | (g >> 5) << 2 | (b >> 6), a]
@@ -165,8 +171,8 @@ def write_icon(size):
     out += [
         "};", "",
         "const lv_img_dsc_t %s = {" % name,
-        "  .header.always_zero = 0,", "  .header.w = %d," % size, "  .header.h = %d," % size,
-        "  .data_size = %d * LV_IMG_PX_SIZE_ALPHA_BYTE," % (size * size),
+        "  .header.always_zero = 0,", "  .header.w = %d," % size_w, "  .header.h = %d," % size_h,
+        "  .data_size = %d * LV_IMG_PX_SIZE_ALPHA_BYTE," % (size_w * size_h),
         "  .header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA,", "  .data = %s_map," % name, "};", "",
     ]
     path = os.path.join(APP_DIR, "images", name + ".c")
@@ -176,9 +182,121 @@ def write_icon(size):
     print(path)
 
 
+def write_icon(size):
+    write_image("slovingo_%dpx" % size, draw_icon(size))
+
+
+# ---------------------------------------------------------------------------
+# mascots: the fox (the player, "Liska") and the rabbit (Andrea), drawn as
+# flat shapes on a transparent background. mood: neutral, happy or sad.
+# ---------------------------------------------------------------------------
+
+OUTLINE = (74, 40, 22, 255)
+ORANGE = (240, 124, 36, 255)
+CREAM = (255, 244, 230, 255)
+DARK = (46, 28, 20, 255)
+
+
+def _poly(d, big, pts, fill, outline=None, width=0.018):
+    pts = [(x * big, y * big) for x, y in pts]
+    d.polygon(pts, fill=fill)
+    if outline:
+        d.line(pts + [pts[0]], fill=outline, width=int(big * width), joint="curve")
+
+
+def _eyes(d, big, mood, xs=(0.33, 0.67), y=0.50, r=0.045):
+    for i, x in enumerate(xs):
+        cx, cy = x * big, y * big
+        if mood == "happy":
+            # closed, smiling eyes: an arc open to the bottom
+            d.arc((cx - r * big * 1.3, cy - r * big * 0.9, cx + r * big * 1.3, cy + r * big * 1.5), 200, 340, fill=DARK, width=int(big * 0.03))
+        else:
+            d.ellipse((cx - r * big, cy - r * big * 1.2, cx + r * big, cy + r * big * 1.2), fill=DARK)
+            d.ellipse((cx - r * big * 0.1, cy - r * big * 0.8, cx + r * big * 0.5, cy - r * big * 0.1), fill=(255, 255, 255, 255))
+        if mood == "sad":
+            # brows slanted up towards the middle, and a tear on the left eye
+            sign = 1 if i == 0 else -1
+            d.line((cx - sign * r * big * 1.6, cy - r * big * 2.4, cx + sign * r * big * 1.6, cy - r * big * 3.4), fill=DARK, width=int(big * 0.025))
+    if mood == "sad":
+        tx, ty = xs[0] * big - r * big * 0.5, y * big + r * big * 1.8
+        d.ellipse((tx - big * 0.022, ty, tx + big * 0.022, ty + big * 0.07), fill=(120, 190, 255, 255))
+
+
+def _mouth(d, big, mood, cx=0.5, y=0.80):
+    w = big * 0.10
+    if mood == "happy":
+        d.arc((cx * big - w, y * big - w * 0.6, cx * big + w, y * big + w * 0.9), 20, 160, fill=DARK, width=int(big * 0.025))
+    elif mood == "sad":
+        d.arc((cx * big - w * 0.8, y * big + w * 0.2, cx * big + w * 0.8, y * big + w * 1.4), 200, 340, fill=DARK, width=int(big * 0.025))
+    else:
+        d.line((cx * big - w * 0.5, y * big + w * 0.3, cx * big + w * 0.5, y * big + w * 0.3), fill=DARK, width=int(big * 0.022))
+
+
+def draw_fox(mood, size):
+    big = size * 8
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    # ears, then the head over their base
+    for mirror in (False, True):
+        m = (lambda x: 1 - x) if mirror else (lambda x: x)
+        _poly(d, big, [(m(0.10), 0.50), (m(0.13), 0.05), (m(0.45), 0.32)], ORANGE, OUTLINE)
+        _poly(d, big, [(m(0.17), 0.30), (m(0.19), 0.13), (m(0.33), 0.30)], DARK)
+    _poly(d, big, [(0.07, 0.50), (0.20, 0.30), (0.36, 0.26), (0.64, 0.26), (0.80, 0.30), (0.93, 0.50), (0.50, 0.95)], ORANGE, OUTLINE)
+    # white cheeks and muzzle
+    _poly(d, big, [(0.10, 0.56), (0.27, 0.64), (0.50, 0.68), (0.73, 0.64), (0.90, 0.56), (0.50, 0.94)], CREAM)
+    d.polygon([(0.45 * big, 0.67 * big), (0.55 * big, 0.67 * big), (0.50 * big, 0.74 * big)], fill=DARK)
+    _eyes(d, big, mood)
+    # mouth on the cheeks, around the nose
+    w = int(big * 0.025)
+    if mood == "happy":
+        d.arc((0.38 * big, 0.62 * big, 0.62 * big, 0.82 * big), 20, 160, fill=DARK, width=w)
+    elif mood == "sad":
+        d.arc((0.41 * big, 0.80 * big, 0.59 * big, 0.92 * big), 200, 340, fill=DARK, width=w)
+    else:
+        d.line((0.50 * big, 0.74 * big, 0.50 * big, 0.79 * big), fill=DARK, width=w)
+        d.line((0.44 * big, 0.80 * big, 0.56 * big, 0.80 * big), fill=DARK, width=w)
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def draw_rabbit(mood, size):
+    big = size * 8
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    fur = (244, 244, 248, 255)
+    edge = (110, 110, 130, 255)
+    pink = (255, 170, 190, 255)
+    for x0 in (0.20, 0.57):
+        d.ellipse((x0 * big, 0.01 * big, (x0 + 0.23) * big, 0.58 * big), fill=fur, outline=edge, width=int(big * 0.018))
+        d.ellipse(((x0 + 0.05) * big, 0.07 * big, (x0 + 0.18) * big, 0.50 * big), fill=pink)
+    d.ellipse((0.10 * big, 0.36 * big, 0.90 * big, 0.96 * big), fill=fur, outline=edge, width=int(big * 0.018))
+    _eyes(d, big, mood, xs=(0.34, 0.66), y=0.62)
+    d.polygon([(0.45 * big, 0.73 * big), (0.55 * big, 0.73 * big), (0.50 * big, 0.79 * big)], fill=pink)
+    _mouth(d, big, mood, y=0.80)
+    if mood == "happy":
+        d.rectangle((0.465 * big, 0.88 * big, 0.495 * big, 0.935 * big), fill=(255, 255, 255, 255), outline=edge, width=int(big * 0.008))
+        d.rectangle((0.505 * big, 0.88 * big, 0.535 * big, 0.935 * big), fill=(255, 255, 255, 255), outline=edge, width=int(big * 0.008))
+    for sign in (-1, 1):
+        for dy in (-0.02, 0.03):
+            d.line((0.50 * big + sign * 0.12 * big, (0.77 + dy) * big, 0.50 * big + sign * 0.36 * big, (0.74 + dy * 2) * big), fill=edge, width=int(big * 0.008))
+    return img.resize((size, size), Image.LANCZOS)
+
+
+# (name, drawing function, mood, size)
+MASCOTS = [
+    ("slv_fox_neutral_40", draw_fox, "neutral", 40),
+    ("slv_fox_happy_40", draw_fox, "happy", 40),
+    ("slv_fox_sad_40", draw_fox, "sad", 40),
+    ("slv_fox_happy_64", draw_fox, "happy", 64),
+    ("slv_fox_sad_64", draw_fox, "sad", 64),
+    ("slv_rabbit_happy_64", draw_rabbit, "happy", 64),
+]
+
+
 if __name__ == "__main__":
     if not os.path.exists(TTF):
         sys.exit("DejaVu Sans not found at " + TTF)
     for s in SIZES:
         write_font(s)
     write_icon(64)
+    for name, draw, mood, size in MASCOTS:
+        write_image(name, draw(mood, size))
