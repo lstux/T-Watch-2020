@@ -64,7 +64,8 @@ LV_FONT_DECLARE( slovingo_22px );
 #define TXT_READ            "Lire la fiche"
 #define TXT_EXERCISES       "Exercices"
 #define TXT_NO_EXERCISES    "Pas d'exercice pour cette fiche"
-#define TXT_NEXT            "Suivant"
+#define SLV_ADVANCE_OK_MS   1000    /** @brief time a right answer stays on screen before the next question */
+#define SLV_ADVANCE_KO_MS   2000    /** @brief time a wrong answer stays on screen (the right one is green) */
 #define TXT_AGAIN           "Rejouer"
 #define TXT_BACK            "Retour"
 #define TXT_SAVE            "Enregistrer"
@@ -171,6 +172,8 @@ static int slv_q_cnt = 0;
 static int slv_q_pos = 0;
 static int slv_score = 0;
 static bool slv_q_answered = false;
+/* lv_tick time when the next question is shown after an answer, 0 = nothing scheduled */
+static uint32_t slv_advance_at = 0;
 static slv_question_t slv_q;
 
 static void slv_show( slv_screen_t screen );
@@ -509,9 +512,8 @@ static void slv_answer( int choice ) {
     if ( choice != slv_q.correct )
         lv_obj_set_style_local_bg_color( slv_item[ choice ], LV_BTN_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( 0xC62828 ) );
 
-    lv_obj_t *next = slv_add_button( slv_q_pos + 1 < slv_q_cnt ? TXT_NEXT : TXT_BACK );
-    lv_tileview_add_element( slv_tile, next );
-    lv_page_focus( slv_page, next, LV_ANIM_ON );
+    /* no next button: the next question comes by itself, a wrong answer stays on screen a little longer */
+    slv_advance_at = lv_tick_get() + ( choice == slv_q.correct ? SLV_ADVANCE_OK_MS : SLV_ADVANCE_KO_MS );
 }
 
 static void slv_next_question( void ) {
@@ -578,6 +580,11 @@ static void slv_lv_task( lv_task_t * task ) {
         slv_show( slv_pending_screen );
     }
 
+    if ( slv_advance_at && slv_screen == SCR_QUIZ && slv_q_answered && lv_tick_get() >= slv_advance_at ) {
+        slv_advance_at = 0;
+        slv_next_question();
+    }
+
     if ( !slv_done )
         return;
 
@@ -630,6 +637,7 @@ static void slv_show( slv_screen_t screen ) {
 
     slv_screen = screen;
     slv_pending = false;
+    slv_advance_at = 0;
     slv_item_cnt = 0;
     slv_url_textarea = NULL;
     lv_page_clean( slv_page );
@@ -782,10 +790,7 @@ static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
                             else
                                 slv_open_data( REQ_EXERCISES );
                             break;
-        case SCR_QUIZ:      if ( item < slv_q.choice_cnt )
-                                slv_answer( item );
-                            else if ( slv_q_answered )
-                                slv_next_question();
+        case SCR_QUIZ:      slv_answer( item );
                             break;
         case SCR_RESULT:    if ( item == 0 ) {
                                 if ( slv_quiz_start() )
@@ -882,6 +887,7 @@ static void slv_app_activate_cb( void ) {
 
 static void slv_app_hibernate_cb( void ) {
     keyboard_hide();
+    slv_advance_at = 0;
 
     /* the big documents go, the index stays, the screens rebuild from it */
     delete slv_sheet;
