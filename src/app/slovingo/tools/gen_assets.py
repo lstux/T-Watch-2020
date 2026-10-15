@@ -220,6 +220,61 @@ def draw_rabbit(mood, size):
     return _mascot("rabbit", mood, size)
 
 
+# ---------------------------------------------------------------------------
+# series pictograms: the emoji of the series themes (the themes of the HTML site,
+# subgroup_themes of lang.json), taken from Noto Color Emoji (SIL OFL) and reduced to
+# 32 px. THEME_ICONS is the list of the C code (slv_themes[] of slovingo_app_main.cpp).
+# ---------------------------------------------------------------------------
+
+EMOJI_TTF = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"
+THEME_ICON_SIZE = 32
+THEME_ICONS = [
+    ("default", "\U0001F4DA"),     # books
+    ("basics", "\U0001F9F0"),      # toolbox
+    ("family", "\U0001F469\U0001F467"),  # a woman and a girl, side by side (the family emoji of Noto is a grey keycap)
+    ("house", "\U0001F3E0"),       # house
+    ("food", "\U0001F372"),        # pot of food
+    ("time", "\U0001F550"),        # clock
+    ("shopping", "\U0001F6D2"),    # shopping cart
+    ("city", "\U0001F3D9"),        # cityscape
+    ("weather", "\U0001F326"),     # sun behind rain cloud
+    ("mountains", "\U0001F3D4"),   # snow-capped mountain
+    ("easter", "\U0001F95A"),      # egg
+    ("animals", "\U0001F98C"),     # deer
+    ("games", "\U0001F3B2"),       # dice
+    ("sea", "\U0001F30A"),         # wave
+]
+
+
+def _emoji_glyph(char):
+    font = ImageFont.truetype(EMOJI_TTF, 109)
+    glyph = Image.new("RGBA", (160, 160), (0, 0, 0, 0))
+    ImageDraw.Draw(glyph).text((10, 10), char, font=font, embedded_color=True)
+    return glyph.crop(glyph.getbbox())
+
+
+def draw_theme_icon(char, size):
+    if len(char) == 2:
+        # two emoji side by side: the first one big, the second smaller and lower
+        big = _emoji_glyph(char[0])
+        little = _emoji_glyph(char[1])
+        canvas = Image.new("RGBA", (200, 160), (0, 0, 0, 0))
+        big = big.resize((int(big.width * 0.95), int(big.height * 0.95)), Image.LANCZOS)
+        little = little.resize((int(little.width * 0.65), int(little.height * 0.65)), Image.LANCZOS)
+        canvas.alpha_composite(big, (0, 0))
+        canvas.alpha_composite(little, (big.width - 12, big.height - little.height))
+        glyph = canvas.crop(canvas.getbbox())
+    else:
+        glyph = _emoji_glyph(char)
+    scale = size / max(glyph.size)
+    w, h = max(1, round(glyph.width * scale)), max(1, round(glyph.height * scale))
+    small = glyph.convert("RGBa").resize((w, h), Image.LANCZOS).convert("RGBA")
+    small = small.filter(ImageFilter.UnsharpMask(radius=0.5, percent=40, threshold=0))
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    img.alpha_composite(small, ((size - w) // 2, (size - h) // 2))
+    return img
+
+
 # (name, drawing function, mood, size)
 MASCOTS = [
     ("slv_fox_neutral_40", draw_fox, "neutral", 40),
@@ -239,3 +294,8 @@ if __name__ == "__main__":
     write_icon(64)
     for name, draw, mood, size in MASCOTS:
         write_image(name, draw(mood, size))
+    if os.path.exists(EMOJI_TTF):
+        for key, char in THEME_ICONS:
+            write_image("slv_theme_%s_%d" % (key, THEME_ICON_SIZE), draw_theme_icon(char, THEME_ICON_SIZE))
+    else:
+        print("Noto Color Emoji not found at %s, the series pictograms are kept as they are" % EMOJI_TTF)

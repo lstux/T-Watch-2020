@@ -52,6 +52,13 @@ Series list -> sheets -> *read* the sheet, or play its exercises.
 - **Exercises**: multiple choice, fill-in-the-blank and word ordering (the words of the
   sentence plus one or two that do not belong, tap them in order). The next question comes
   by itself after an answer, the progress and score are in the footer.
+- **Menus**: each series has the pictogram and the colour of its theme (the `theme` of the
+  sheets in `index.json`, the themes of the HTML site: basics, family, house, food, time,
+  shopping, city, weather, mountains, easter, animals, games, sea; a series without theme gets
+  the books). The home screen starts with the fox and the `greeting` of the course (with the
+  name of the player and its translation), the menu of a sheet has the fox thinking, the
+  loading screen a bouncing fox and the errors a sad one. The pictograms are the emoji of
+  Noto Color Emoji (SIL OFL), reduced to 32 px by `tools/gen_assets.py`.
 - **Mascots**: the fox (the player) sits in the footer of the quiz and smiles or cries
   at the answers, the watch buzzes a little (when "vibe feedback" is on); the result
   screen shows the fox, the rabbit from 70 %, and a little phrase of the course with its
