@@ -121,6 +121,7 @@ static lv_obj_t *slv_tile = NULL;
 static lv_obj_t *slv_page = NULL;
 static lv_obj_t *slv_exit_btn = NULL;
 static lv_obj_t *slv_refresh_btn = NULL;
+static lv_obj_t *slv_progress_lbl = NULL;   /* "x/x  Score: n" in the footer, quiz only */
 static lv_obj_t *slv_setup_btn = NULL;
 static lv_obj_t *slv_url_textarea = NULL;
 static lv_task_t *slv_task = NULL;
@@ -644,6 +645,7 @@ static void slv_show( slv_screen_t screen ) {
 
     lv_obj_set_hidden( slv_refresh_btn, !( screen == SCR_GROUPS || screen == SCR_ERROR ) );
     lv_obj_set_hidden( slv_setup_btn, screen != SCR_GROUPS );
+    lv_obj_set_hidden( slv_progress_lbl, screen != SCR_QUIZ );
 
     switch ( screen ) {
         case SCR_LOADING:
@@ -706,8 +708,8 @@ static void slv_show( slv_screen_t screen ) {
         }
 
         case SCR_QUIZ:
-            snprintf( text, sizeof( text ), "%d/%d    %s: %d", slv_q_pos + 1, slv_q_cnt, "Score", slv_score );
-            slv_add_label( text, false );
+            snprintf( text, sizeof( text ), "%d/%d  Score: %d", slv_q_pos + 1, slv_q_cnt, slv_score );
+            lv_label_set_text( slv_progress_lbl, text );
             slv_add_label( slv_q.prompt, true );
             if ( *slv_q.hint )
                 slv_add_label( slv_q.hint, false );
@@ -933,6 +935,14 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     slv_exit_btn = wf_add_exit_button( slv_tile, slv_back_event_cb );
     lv_obj_align( slv_exit_btn, slv_tile, LV_ALIGN_IN_BOTTOM_LEFT, THEME_ICON_PADDING, -THEME_ICON_PADDING );
 
+    /* quiz progress, right of the exit arrow (same row, the refresh button is hidden in the quiz) */
+    slv_progress_lbl = lv_label_create( slv_tile, NULL );
+    lv_label_set_long_mode( slv_progress_lbl, LV_LABEL_LONG_CROP );
+    lv_obj_set_width( slv_progress_lbl, hor_res - 2 * THEME_ICON_SIZE - 2 * THEME_ICON_PADDING );
+    lv_obj_add_style( slv_progress_lbl, LV_LABEL_PART_MAIN, &slv_style16 );
+    lv_obj_align( slv_progress_lbl, slv_exit_btn, LV_ALIGN_OUT_RIGHT_MID, THEME_PADDING, 0 );
+    lv_obj_set_hidden( slv_progress_lbl, true );
+
     slv_refresh_btn = wf_add_refresh_button( slv_tile, slv_refresh_event_cb );
     lv_obj_align( slv_refresh_btn, slv_tile, LV_ALIGN_IN_BOTTOM_MID, 0, -THEME_ICON_PADDING );
 
@@ -943,6 +953,7 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
     lv_tileview_add_element( slv_tile, slv_exit_btn );
     lv_tileview_add_element( slv_tile, slv_refresh_btn );
     lv_tileview_add_element( slv_tile, slv_setup_btn );
+    lv_tileview_add_element( slv_tile, slv_progress_lbl );
 
     slv_task = lv_task_create( slv_lv_task, 100, LV_TASK_PRIO_OFF, NULL );
 
