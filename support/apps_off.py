@@ -48,6 +48,7 @@ NOT_ESSENTIAL = [
     "app/powermeter",
     "app/printer3d",
     "app/sailing",
+    "app/slovingo",
     "app/soundmeter",
     "app/tiltmouse",
     "app/voicerec",
