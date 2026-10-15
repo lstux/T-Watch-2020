@@ -38,7 +38,13 @@ cache (the cache file is named after the url).
 
 Series list -> sheets -> *read* the sheet, or play its exercises.
 
-- **Reading** goes page by page, the arrows in the footer turn the pages. Text blocks are
+- **Navigation**: the arrows at the right of the footer go to the previous or next series on
+  the list of a series, and to the previous or next sheet on the menu of a sheet (the sheets
+  follow the order of the course, so the end of a series leads to the next one). On the last
+  page of a sheet the next arrow opens the next sheet, and the result of a quiz has a
+  "Fiche suivante" button.
+- **Reading** goes page by page, the arrows in the footer turn the pages, and so does a swipe
+  (left: next page, right: previous page; only in the reader). Text blocks are
   put together, dialogue lines are chat bubbles (the fox, i.e. you, on the right, the others on the left,
   coloured name) with the translation under the line and the word by word glosses on a tap, and vocabulary tables become cards
   (word, then sound and meaning; the translations start hidden, a tap shows or hides one, a button shows or hides all

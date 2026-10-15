@@ -88,6 +88,7 @@ LV_IMG_DECLARE( slv_rabbit_happy_64 );
 #define SLV_ADVANCE_KO_MS   2000    /** @brief time a wrong answer stays on screen (the right one is green) */
 #define TXT_AGAIN           "Rejouer"
 #define TXT_BACK            "Retour"
+#define TXT_NEXT_SHEET      "Fiche suivante"
 #define TXT_SAVE            "Enregistrer"
 #define TXT_DEFAULT         "Valeur par défaut"
 #define TXT_URL_HELP        "Adresse du dossier du cours (api) :"
@@ -242,6 +243,11 @@ static void slv_back_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_refresh_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_setup_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_nav_event_cb( lv_obj_t * obj, lv_event_t event );
+static void slv_gesture_event_cb( lv_obj_t * obj, lv_event_t event );
+static void slv_navigate( int dir );
+static void slv_read_next_sheet( void );
+static void slv_open_data( slv_req_t req );
+static void slv_set_nav( bool prev_ok, bool next_ok );
 static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event );
 static void slv_textarea_event_cb( lv_obj_t * obj, lv_event_t event );
 
@@ -398,6 +404,36 @@ static void slv_collect_sheets( int group ) {
 
 static JsonObject slv_cur_sheet_obj( void ) {
     return( (*slv_index)["sheets"][ slv_cur_sheet ] );
+}
+
+/* position in index["sheets"] of the sheet before (dir -1) or after (dir 1) the current one, -1 if none.
+   The sheets follow the order of the course, so the next one of a series' last is the first of the next series */
+static int slv_neighbor_sheet( int dir ) {
+    if ( !slv_index || slv_cur_sheet < 0 )
+        return( -1 );
+
+    int pos = slv_cur_sheet + dir;
+    int total = (*slv_index)["sheets"].size();
+    return( pos >= 0 && pos < total ? pos : -1 );
+}
+
+/* the sheet at this position becomes the current one, with its series */
+static void slv_select_sheet( int pos ) {
+    JsonObject sheet = (*slv_index)["sheets"][ pos ];
+    const char *cat = sheet["cat"] | "";
+    const char *sub = sheet["sub"] | "";
+
+    slv_cur_sheet = pos;
+    for ( int i = 0; i < slv_group_cnt; i++ ) {
+        if ( !strcmp( slv_groups[ i ].cat, cat ) && !strcmp( slv_groups[ i ].sub, sub ) ) {
+            slv_cur_group = i;
+            break;
+        }
+    }
+    delete slv_sheet;
+    slv_sheet = NULL;
+    delete slv_ex;
+    slv_ex = NULL;
 }
 
 /* exercises the watch can play: qcm and fill-blank (no audio, no drag and drop) */
@@ -895,7 +931,8 @@ static void slv_reader_render( void ) {
         lv_obj_clear_state( slv_prev_btn, LV_STATE_DISABLED );
     else
         lv_obj_add_state( slv_prev_btn, LV_STATE_DISABLED );
-    if ( slv_rd_cur + 1 < slv_rd_cnt )
+    /* on the last page the next button goes on to the next sheet */
+    if ( slv_rd_cur + 1 < slv_rd_cnt || slv_neighbor_sheet( 1 ) >= 0 )
         lv_obj_clear_state( slv_next_btn, LV_STATE_DISABLED );
     else
         lv_obj_add_state( slv_next_btn, LV_STATE_DISABLED );
@@ -1423,6 +1460,17 @@ static void slv_hold_screen( bool hold ) {
     slv_hold = hold;
 }
 
+static void slv_set_nav( bool prev_ok, bool next_ok ) {
+    if ( prev_ok )
+        lv_obj_clear_state( slv_prev_btn, LV_STATE_DISABLED );
+    else
+        lv_obj_add_state( slv_prev_btn, LV_STATE_DISABLED );
+    if ( next_ok )
+        lv_obj_clear_state( slv_next_btn, LV_STATE_DISABLED );
+    else
+        lv_obj_add_state( slv_next_btn, LV_STATE_DISABLED );
+}
+
 static void slv_show( slv_screen_t screen ) {
     char text[ 160 ];
 
@@ -1439,8 +1487,14 @@ static void slv_show( slv_screen_t screen ) {
     lv_obj_set_hidden( slv_progress_lbl, !( screen == SCR_QUIZ || screen == SCR_READER ) );
     slv_hold_screen( screen == SCR_QUIZ || screen == SCR_READER || screen == SCR_RESULT );
     lv_obj_set_hidden( slv_mascot, screen != SCR_QUIZ );
-    lv_obj_set_hidden( slv_prev_btn, screen != SCR_READER );
-    lv_obj_set_hidden( slv_next_btn, screen != SCR_READER );
+    /* previous and next: page of the reader, sheet of a sheet, series of a series */
+    bool nav = screen == SCR_READER || screen == SCR_SHEET || screen == SCR_SHEETS;
+    lv_obj_set_hidden( slv_prev_btn, !nav );
+    lv_obj_set_hidden( slv_next_btn, !nav );
+    if ( screen == SCR_SHEET )
+        slv_set_nav( slv_neighbor_sheet( -1 ) >= 0, slv_neighbor_sheet( 1 ) >= 0 );
+    else if ( screen == SCR_SHEETS )
+        slv_set_nav( slv_cur_group > 0, slv_cur_group + 1 < slv_group_cnt );
     memset( slv_rd_more, 0, sizeof( slv_rd_more ) );
 
     switch ( screen ) {
@@ -1533,6 +1587,8 @@ static void slv_show( slv_screen_t screen ) {
             snprintf( text, sizeof( text ), "Score : %d / %d", slv_score, slv_q_cnt );
             slv_add_label( text, false );
             slv_add_button( TXT_AGAIN );
+            if ( slv_neighbor_sheet( 1 ) >= 0 )
+                slv_add_button( TXT_NEXT_SHEET );
             slv_add_button( TXT_BACK );
             break;
         }
@@ -1578,11 +1634,7 @@ static void slv_open_group( int item ) {
 static void slv_open_sheet( int item ) {
     if ( item < 0 || item >= slv_sheet_cnt )
         return;
-    slv_cur_sheet = slv_sheet_idx[ item ];
-    delete slv_sheet;
-    slv_sheet = NULL;
-    delete slv_ex;
-    slv_ex = NULL;
+    slv_select_sheet( slv_sheet_idx[ item ] );
     slv_goto( SCR_SHEET );
 }
 
@@ -1636,6 +1688,9 @@ static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
         case SCR_RESULT:    if ( item == 0 ) {
                                 if ( slv_quiz_start() )
                                     slv_goto( SCR_QUIZ );
+                            }
+                            else if ( item == 1 && slv_neighbor_sheet( 1 ) >= 0 ) {
+                                slv_read_next_sheet();
                             }
                             else {
                                 slv_goto( SCR_SHEET );
@@ -1713,17 +1768,61 @@ static void slv_setup_event_cb( lv_obj_t * obj, lv_event_t event ) {
         slv_goto( SCR_COURSES );
 }
 
+/* open the reader on the next sheet; if the download fails the way back is the menu of that sheet */
+static void slv_read_next_sheet( void ) {
+    slv_select_sheet( slv_neighbor_sheet( 1 ) );
+    slv_screen = SCR_SHEET;
+    slv_open_data( REQ_SHEET );
+}
+
+/* dir -1 or 1: previous or next page of the reader (the next sheet after the last page),
+   sheet of the sheet screen, series of the sheets screen */
+static void slv_navigate( int dir ) {
+    switch ( slv_screen ) {
+        case SCR_READER:
+            if ( slv_rd_cur + dir >= 0 && slv_rd_cur + dir < slv_rd_cnt ) {
+                slv_rd_cur += dir;
+                slv_goto( SCR_READER );
+            }
+            else if ( dir > 0 && slv_neighbor_sheet( 1 ) >= 0 ) {
+                slv_read_next_sheet();
+            }
+            break;
+        case SCR_SHEET:
+            if ( slv_neighbor_sheet( dir ) >= 0 ) {
+                slv_select_sheet( slv_neighbor_sheet( dir ) );
+                slv_goto( SCR_SHEET );
+            }
+            break;
+        case SCR_SHEETS:
+            if ( slv_cur_group + dir >= 0 && slv_cur_group + dir < slv_group_cnt ) {
+                slv_cur_group += dir;
+                slv_goto( SCR_SHEETS );
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 static void slv_nav_event_cb( lv_obj_t * obj, lv_event_t event ) {
-    if ( event != LV_EVENT_CLICKED || slv_screen != SCR_READER )
+    if ( event != LV_EVENT_CLICKED || slv_busy )
+        return;
+    slv_navigate( obj == slv_prev_btn ? -1 : 1 );
+}
+
+/* swipe: only the pages of the reader, left for the next, right for the previous */
+static void slv_gesture_event_cb( lv_obj_t * obj, lv_event_t event ) {
+    if ( event != LV_EVENT_GESTURE || slv_screen != SCR_READER || slv_busy )
         return;
 
-    if ( obj == slv_prev_btn && slv_rd_cur > 0 )
-        slv_rd_cur--;
-    else if ( obj == slv_next_btn && slv_rd_cur + 1 < slv_rd_cnt )
-        slv_rd_cur++;
-    else
-        return;
-    slv_goto( SCR_READER );
+    switch ( lv_indev_get_gesture_dir( lv_indev_get_act() ) ) {
+        case LV_GESTURE_DIR_LEFT:   slv_navigate( 1 );
+                                    break;
+        case LV_GESTURE_DIR_RIGHT:  slv_navigate( -1 );
+                                    break;
+        default:                    break;
+    }
 }
 
 static void slv_textarea_event_cb( lv_obj_t * obj, lv_event_t event ) {
@@ -1853,6 +1952,10 @@ void slovingo_app_main_setup( uint32_t tile_num ) {
 
     slv_setup_btn = wf_add_setup_button( slv_tile, slv_setup_event_cb );
     lv_obj_align( slv_setup_btn, slv_tile, LV_ALIGN_IN_BOTTOM_RIGHT, -THEME_ICON_PADDING, -THEME_ICON_PADDING );
+
+    /* the swipes of the pages stop at the tile: the reader turns its pages with them */
+    lv_obj_set_gesture_parent( slv_tile, false );
+    lv_obj_set_event_cb( slv_tile, slv_gesture_event_cb );
 
     lv_tileview_add_element( slv_tile, slv_page );
     lv_tileview_add_element( slv_tile, slv_exit_btn );
