@@ -25,6 +25,8 @@
 
     /** @brief how long to wait for the wifi when it has to be switched on */
     #define SLOVINGO_WIFI_WAIT_MS   20000
+    #define SLOVINGO_TRIES          3       /** @brief downloads tried before giving up */
+    #define SLOVINGO_RETRY_WAIT_MS  1000    /** @brief wait before the 2nd try, doubled before the 3rd */
 
     typedef enum {
         SLOVINGO_OK = 0,

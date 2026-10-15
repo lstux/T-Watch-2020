@@ -146,23 +146,38 @@ slovingo_result_t slovingo_fetch_json( const char *base_url, const char *path, b
     }
 #endif
 
+    /*
+     * a download that fails is tried again (the wifi or the tls handshake is
+     * often not ready the first time), a document that does not parse is not
+     */
     slovingo_result_t result = SLOVINGO_ERR_NET;
-    uri_load_dsc_t *uri_load_dsc = uri_load_to_ram( url );
 
-    if ( uri_load_dsc ) {
-        if ( uri_load_dsc->data && uri_load_dsc->size ) {
-            *doc = slovingo_parse( (const char*)uri_load_dsc->data, uri_load_dsc->size );
-            if ( *doc ) {
-                result = SLOVINGO_OK;
+    for ( int attempt = 0; attempt < SLOVINGO_TRIES && result == SLOVINGO_ERR_NET; attempt++ ) {
 #ifndef NATIVE_64BIT
-                slovingo_cache_store( cache, uri_load_dsc->data, uri_load_dsc->size );
-#endif
-            }
-            else {
-                result = SLOVINGO_ERR_PARSE;
-            }
+        if ( attempt ) {
+            log_w("slovingo: download failed, try %d of %d", attempt + 1, SLOVINGO_TRIES );
+            vTaskDelay( ( attempt * SLOVINGO_RETRY_WAIT_MS ) / portTICK_PERIOD_MS );
+            if ( !WiFi.isConnected() )
+                continue;
         }
-        uri_load_free_all( uri_load_dsc );
+#endif
+        uri_load_dsc_t *uri_load_dsc = uri_load_to_ram( url );
+
+        if ( uri_load_dsc ) {
+            if ( uri_load_dsc->data && uri_load_dsc->size ) {
+                *doc = slovingo_parse( (const char*)uri_load_dsc->data, uri_load_dsc->size );
+                if ( *doc ) {
+                    result = SLOVINGO_OK;
+#ifndef NATIVE_64BIT
+                    slovingo_cache_store( cache, uri_load_dsc->data, uri_load_dsc->size );
+#endif
+                }
+                else {
+                    result = SLOVINGO_ERR_PARSE;
+                }
+            }
+            uri_load_free_all( uri_load_dsc );
+        }
     }
 
 #ifndef NATIVE_64BIT
