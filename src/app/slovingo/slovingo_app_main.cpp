@@ -92,6 +92,8 @@ LV_IMG_DECLARE( slv_rabbit_happy_64 );
 #define TXT_DEFAULT         "Valeur par défaut"
 #define TXT_URL_HELP        "Adresse du dossier du cours (api) :"
 #define TXT_COURSE          "Cours"
+#define TXT_CHOOSE_COURSE   "Choisis ton cours"
+#define TXT_OTHER_URL       "Autre adresse..."
 #define TXT_EMPTY_SHEET     "Fiche vide"
 #define TXT_HIDE_TRANSLATIONS "Cacher les traductions"
 #define TXT_SHOW_TRANSLATIONS "Afficher les traductions"
@@ -116,7 +118,8 @@ typedef enum {
     SCR_READER,
     SCR_QUIZ,
     SCR_RESULT,
-    SCR_SETUP
+    SCR_SETUP,
+    SCR_COURSES
 } slv_screen_t;
 
 typedef enum {
@@ -227,6 +230,7 @@ static slv_question_t slv_q;
 
 static void slv_show( slv_screen_t screen );
 static void slv_goto( slv_screen_t screen );
+static void slv_load_course( void );
 static void slv_request( slv_req_t req, const char *path, bool force );
 static void slv_app_activate_cb( void );
 static void slv_app_hibernate_cb( void );
@@ -1458,6 +1462,13 @@ static void slv_show( slv_screen_t screen ) {
             break;
         }
 
+        case SCR_COURSES:
+            slv_add_label( TXT_CHOOSE_COURSE, true );
+            for ( int i = 0; i < slovingo_course_count; i++ )
+                slv_add_button( slovingo_courses[ i ].label );
+            slv_add_button( TXT_OTHER_URL );
+            break;
+
         case SCR_SETUP:
             slv_add_label( TXT_URL_HELP, false );
             slv_url_textarea = lv_textarea_create( slv_page, NULL );
@@ -1508,6 +1519,20 @@ static void slv_open_data( slv_req_t req ) {
     slv_request( req, path, false );
 }
 
+/* the url of the config is the course to load: forget the current one and fetch its index */
+static void slv_load_course( void ) {
+    slovingo_config.chosen = true;
+    slovingo_config.save();
+    delete slv_index;
+    slv_index = NULL;
+    delete slv_sheet;
+    slv_sheet = NULL;
+    delete slv_ex;
+    slv_ex = NULL;
+    slv_build_groups();
+    slv_request( REQ_INDEX, "index.json", true );
+}
+
 static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
     if ( event != LV_EVENT_CLICKED )
         return;
@@ -1541,6 +1566,13 @@ static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
                                 slv_goto( SCR_SHEET );
                             }
                             break;
+        case SCR_COURSES:   if ( item >= slovingo_course_count ) {
+                                slv_goto( SCR_SETUP );
+                                break;
+                            }
+                            slovingo_course_url( item, slovingo_config.url, sizeof( slovingo_config.url ) );
+                            slv_load_course();
+                            break;
         case SCR_SETUP:     if ( item == 0 ) {
                                 if ( slv_url_textarea )
                                     snprintf( slovingo_config.url, sizeof( slovingo_config.url ), "%s", lv_textarea_get_text( slv_url_textarea ) );
@@ -1549,15 +1581,7 @@ static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
                                 snprintf( slovingo_config.url, sizeof( slovingo_config.url ), "%s", SLOVINGO_DEFAULT_URL );
                             }
                             keyboard_hide();
-                            slovingo_config.save();
-                            delete slv_index;
-                            slv_index = NULL;
-                            delete slv_sheet;
-                            slv_sheet = NULL;
-                            delete slv_ex;
-                            slv_ex = NULL;
-                            slv_build_groups();
-                            slv_request( REQ_INDEX, "index.json", true );
+                            slv_load_course();
                             break;
         default:            break;
     }
@@ -1582,10 +1606,15 @@ static void slv_back_event_cb( lv_obj_t * obj, lv_event_t event ) {
         case SCR_QUIZ:
         case SCR_RESULT:    slv_goto( SCR_SHEET );
                             break;
-        case SCR_SETUP:     slv_goto( slv_index ? SCR_GROUPS : SCR_ERROR );
+        case SCR_SETUP:     slv_goto( SCR_COURSES );
+                            break;
+        case SCR_COURSES:   if ( slv_index )
+                                slv_goto( SCR_GROUPS );
+                            else
+                                mainbar_jump_back();
                             break;
         case SCR_ERROR:     if ( !slv_index )
-                                mainbar_jump_back();
+                                slv_goto( SCR_COURSES );
                             else
                                 slv_goto( slv_screen_before_load == SCR_LOADING ? SCR_GROUPS : slv_screen_before_load );
                             break;
@@ -1606,7 +1635,7 @@ static void slv_setup_event_cb( lv_obj_t * obj, lv_event_t event ) {
     if ( event != LV_EVENT_CLICKED )
         return;
     if ( slv_screen == SCR_GROUPS )
-        slv_goto( SCR_SETUP );
+        slv_goto( SCR_COURSES );
 }
 
 static void slv_nav_event_cb( lv_obj_t * obj, lv_event_t event ) {
@@ -1630,7 +1659,10 @@ static void slv_textarea_event_cb( lv_obj_t * obj, lv_event_t event ) {
 static void slv_app_activate_cb( void ) {
     lv_task_set_prio( slv_task, LV_TASK_PRIO_MID );
 
-    if ( !slv_index && !slv_busy ) {
+    if ( !slv_index && !slv_busy && !slovingo_config.chosen ) {
+        slv_goto( SCR_COURSES );
+    }
+    else if ( !slv_index && !slv_busy && slv_screen != SCR_COURSES && slv_screen != SCR_SETUP ) {
         slv_screen = SCR_GROUPS;
         slv_request( REQ_INDEX, "index.json", false );
     }
@@ -1671,7 +1703,7 @@ static void slv_app_hibernate_cb( void ) {
     else if ( slv_screen == SCR_READER || slv_screen == SCR_QUIZ || slv_screen == SCR_RESULT )
         slv_goto( SCR_SHEET );
     else if ( slv_screen == SCR_SETUP )
-        slv_goto( slv_index ? SCR_GROUPS : SCR_ERROR );
+        slv_goto( SCR_COURSES );
 }
 
 void slovingo_app_main_setup( uint32_t tile_num ) {

@@ -30,6 +30,20 @@
     #define SLOVINGO_NAME_LEN           24
     #define SLOVINGO_DEFAULT_NAME       "L\xC3\xAD\xC5\xA1ka"      /** @brief "Liska" (fox), what [USER_NAME] stands for in the course */
 
+    #define SLOVINGO_URL_PREFIX         "https://lstux.github.io/"
+    #define SLOVINGO_URL_SUFFIX         "/api/"
+
+    /** @brief a course of the static list: name on the screen and name of its repository (GitHub Pages) */
+    struct slovingo_course_t {
+        const char *label;
+        const char *repo;
+    };
+    extern const slovingo_course_t slovingo_courses[];
+    extern const int slovingo_course_count;
+
+    /** @brief build the export folder url of a course of the list */
+    void slovingo_course_url( int course, char *url, size_t len );
+
     /**
      * @brief slovingo config structure
      */
@@ -38,6 +52,8 @@
         slovingo_config_t();
         /** @brief folder of the course export (output of src/export_api.py), index.json lives in it */
         char url[ SLOVINGO_URL_LEN ] = SLOVINGO_DEFAULT_URL;
+        /** @brief true once a course was picked (the first start shows the list) */
+        bool chosen = false;
         /** @brief questions per exercise session */
         uint8_t questions = SLOVINGO_QUESTIONS_DEFAULT;
         /** @brief name of the player, shown where the course has [USER_NAME] */
