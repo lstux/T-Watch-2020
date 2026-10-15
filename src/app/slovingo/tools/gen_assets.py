@@ -117,17 +117,24 @@ def write_font(size):
 
 
 def draw_icon(size):
+    """The fox (happy) on the blue of the Slovak flag, with a small speech bubble."""
     big = size * 8
     img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((big * 0.04, big * 0.04, big * 0.96, big * 0.96), radius=big * 0.22, fill=(11, 78, 162, 255))
-    # Slovak flag stripes along the bottom, under a white speech bubble
-    d.rounded_rectangle((big * 0.16, big * 0.14, big * 0.84, big * 0.66), radius=big * 0.14, fill=(255, 255, 255, 255))
-    d.polygon([(big * 0.30, big * 0.62), (big * 0.30, big * 0.82), (big * 0.52, big * 0.62)], fill=(255, 255, 255, 255))
-    font = ImageFont.truetype(TTF_BOLD, int(big * 0.42))
-    d.text((big * 0.50, big * 0.40), "S", fill=(11, 78, 162, 255), font=font, anchor="mm")
-    d.rectangle((big * 0.62, big * 0.74, big * 0.88, big * 0.78), fill=(238, 28, 37, 255))
-    return img.resize((size, size), Image.LANCZOS)
+    # tricolour band at the bottom: white, blue, red
+    band = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(band)
+    bd.rectangle((0, big * 0.80, big, big * 0.853), fill=(255, 255, 255, 255))
+    bd.rectangle((0, big * 0.853, big, big * 0.906), fill=(40, 110, 210, 255))
+    bd.rectangle((0, big * 0.906, big, big), fill=(238, 28, 37, 255))
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((big * 0.04, big * 0.04, big * 0.96, big * 0.96), radius=big * 0.22, fill=255)
+    img.paste(band, (0, 0), Image.composite(band.split()[3], Image.new("L", (big, big), 0), mask))
+    icon = img.resize((size, size), Image.LANCZOS)
+    fox = draw_fox("happy", int(size * 0.74))
+    icon.alpha_composite(fox, ((size - fox.width) // 2, int(size * 0.07)))
+    return icon
 
 
 def write_image(name, img):
