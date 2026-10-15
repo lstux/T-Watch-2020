@@ -20,11 +20,17 @@ so a course already opened keeps working without wifi. Refresh (bottom middle) f
 ## Configuration
 
 `/slovingo.json` on the SPIFFS, see `conf/slovingo.json.example`. It can also be changed from
-the app (setup button, bottom right).
+the app (setup button, bottom right), which opens the course list.
+
+The first start shows "Choisis ton cours": a static list in `slovingo_config.cpp`
+(`slovingo_courses[]`, the repositories `lstux/Slovingo-xx-xx*` published on GitHub Pages).
+"Autre adresse..." at the end of the list keeps the free `url` field. Each course has its own
+cache (the cache file is named after the url).
 
 | key         | default                                                  | meaning                      |
 |-------------|----------------------------------------------------------|------------------------------|
 | `url`       | `https://lstux.github.io/Slovingo-sk-fr-kids/api/` | folder of the course export  |
+| `chosen`    | `false`                                                  | a course was picked (otherwise the list is shown) |
 | `questions` | `10`                                                     | questions per exercise round |
 | `name`      | `Líška`                                                  | name of the player, shown where the course has `[USER_NAME]` |
 
