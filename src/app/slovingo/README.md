@@ -39,8 +39,8 @@ cache (the cache file is named after the url).
 Series list -> sheets -> *read* the sheet, or play its exercises.
 
 - **Reading** goes page by page, the arrows in the footer turn the pages. Text blocks are
-  put together, dialogue lines show who speaks (coloured name) with the translation under
-  the line and the word by word glosses on a tap, and vocabulary tables become cards
+  put together, dialogue lines are chat bubbles (the fox, i.e. you, on the right, the others on the left,
+  coloured name) with the translation under the line and the word by word glosses on a tap, and vocabulary tables become cards
   (word, then sound and meaning; the translations start hidden, a tap shows or hides one, a button shows or hides all
   of them to test yourself).
 - **Exercises**: multiple choice, fill-in-the-blank and word ordering (the words of the
