@@ -65,6 +65,7 @@ LV_FONT_DECLARE( slovingo_22px );
 #define SLV_ITEM_GAP        5       /* px between two blocks (buttons, labels) */
 #define SLV_BTN_PAD_X       4       /* px inside a button, left and right of its text */
 #define SLV_BTN_PAD_Y       2       /* px inside a button, above and below its text */
+#define SLV_CHIP_PAD_X      6       /* px inside a word button of the order exercises, left and right */
 
 /*
  * texts of the interface (the course content has its own language)
@@ -81,13 +82,16 @@ LV_FONT_DECLARE( slovingo_22px );
 #define TXT_DEFAULT         "Valeur par défaut"
 #define TXT_URL_HELP        "Adresse du dossier du cours (api) :"
 #define TXT_COURSE          "Cours"
-#define TXT_ORDER           "Remets les mots dans l'ordre :"
+#define TXT_ORDER           "Remets les mots dans l'ordre"
 
 #define SLV_MAX_GROUPS      32
 #define SLV_MAX_ITEMS       64
 #define SLV_MAX_Q           64
 #define SLV_MAX_CHOICES     4
-#define SLV_MAX_TOKENS      12      /* longest order exercise the watch plays */
+#define SLV_MAX_TOKENS      16      /* most words of an order sentence the watch plays */
+#define SLV_MAX_DISTRACT    2       /* words that do not belong in the sentence */
+#define SLV_MAX_SHOWN       ( SLV_MAX_TOKENS + SLV_MAX_DISTRACT )
+#define SLV_MAX_CAND        20      /* distractor candidates looked at */
 #define SLV_TOKEN_LEN       40
 #define SLV_TEXT_MAX        16384
 
@@ -128,10 +132,11 @@ typedef struct {
     char choice[ SLV_MAX_CHOICES ][ 96 ];
     int choice_cnt;
     int correct;
-    /* order: word[] in the right order, button k shows word[ perm[ k ] ] */
+    /* order: the sentence word by word, and the buttons: its words plus the distractors, shuffled */
     char word[ SLV_MAX_TOKENS ][ SLV_TOKEN_LEN ];
-    uint8_t perm[ SLV_MAX_TOKENS ];
+    char shown[ SLV_MAX_SHOWN ][ SLV_TOKEN_LEN ];
     uint8_t word_cnt;
+    uint8_t shown_cnt;
     uint8_t picked[ SLV_MAX_TOKENS ];   /* buttons tapped so far, in tap order */
     uint8_t picked_cnt;
 } slv_question_t;
@@ -259,6 +264,36 @@ static lv_obj_t *slv_add_button( const char *text ) {
     lv_label_set_align( label, LV_LABEL_ALIGN_CENTER );
     lv_label_set_text( label, buffer );
     lv_obj_add_style( label, LV_LABEL_PART_MAIN, &slv_style16 );
+
+    if ( slv_item_cnt < SLV_MAX_ITEMS )
+        slv_item[ slv_item_cnt++ ] = btn;
+    return( btn );
+}
+
+/*
+ * word button: as wide as its word so that several fit on a line, registered
+ * as item of the screen like the other buttons
+ */
+static lv_obj_t *slv_add_chip( lv_obj_t *parent, const char *text ) {
+    lv_obj_t *btn = lv_btn_create( parent, NULL );
+    lv_btn_set_fit( btn, LV_FIT_TIGHT );
+    lv_obj_add_style( btn, LV_BTN_PART_MAIN, ws_get_button_style() );
+    lv_obj_set_style_local_pad_left( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_CHIP_PAD_X );
+    lv_obj_set_style_local_pad_right( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_CHIP_PAD_X );
+    lv_obj_set_style_local_pad_top( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_Y + 2 );
+    lv_obj_set_style_local_pad_bottom( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, SLV_BTN_PAD_Y + 2 );
+    lv_obj_set_event_cb( btn, slv_item_event_cb );
+
+    lv_obj_t *label = lv_label_create( btn, NULL );
+    lv_label_set_long_mode( label, LV_LABEL_LONG_EXPAND );
+    lv_label_set_text( label, text );
+    lv_obj_add_style( label, LV_LABEL_PART_MAIN, &slv_style16 );
+    /* a word wider than the screen wraps */
+    lv_coord_t max_w = slv_content_w() - 2 * SLV_CHIP_PAD_X;
+    if ( lv_obj_get_width( label ) > max_w ) {
+        lv_label_set_long_mode( label, LV_LABEL_LONG_BREAK );
+        lv_obj_set_width( label, max_w );
+    }
 
     if ( slv_item_cnt < SLV_MAX_ITEMS )
         slv_item[ slv_item_cnt++ ] = btn;
@@ -450,44 +485,123 @@ static void slv_q_add_distractors( JsonArray distractors ) {
 }
 
 /*
- * qcm: ask in one language, answer in the other, direction picked at random
- * fill-blank: the target sentence with its missing word hidden
+ * order: words of an exercise. Each chunk of tokens_l2 is cut at its spaces to
+ * get single words; when that is too many for the screen the chunks are kept
+ * as they are. words may be NULL to just count. Returns the number of words,
+ * 0 when the exercise cannot be played.
  */
+static bool slv_order_add( char words[][ SLV_TOKEN_LEN ], int *n, const char *text, size_t len ) {
+    if ( !len )
+        return( true );
+    if ( *n >= SLV_MAX_TOKENS )
+        return( false );
+    if ( words ) {
+        if ( len >= SLV_TOKEN_LEN )
+            len = SLV_TOKEN_LEN - 1;
+        memcpy( words[ *n ], text, len );
+        words[ *n ][ len ] = '\0';
+    }
+    ( *n )++;
+    return( true );
+}
+
+static int slv_order_words( JsonArray tokens, char words[][ SLV_TOKEN_LEN ] ) {
+    for ( int split = 1; split >= 0; split-- ) {
+        int n = 0;
+        bool fits = true;
+
+        for ( JsonVariant token : tokens ) {
+            char chunk[ 96 ];
+            const char *src = token.as<const char*>();
+
+            slovingo_sanitize( src ? src : "", chunk, sizeof( chunk ) );
+            if ( !split ) {
+                fits = slv_order_add( words, &n, chunk, strlen( chunk ) );
+            }
+            else {
+                const char *p = chunk;
+                while ( fits && *p ) {
+                    while ( *p == ' ' )
+                        p++;
+                    const char *end = p;
+                    while ( *end && *end != ' ' )
+                        end++;
+                    fits = slv_order_add( words, &n, p, end - p );
+                    p = end;
+                }
+            }
+            if ( !fits )
+                break;
+        }
+        if ( fits && n >= 2 )
+            return( n );
+    }
+    return( 0 );
+}
+
 /*
- * order: the words of tokens_l2 in a random order, the watch only takes sentences of 2 to SLV_MAX_TOKENS words
+ * order: the words of the sentence plus one or two words of the other sentences
+ * of the sheet that do not belong in it, all in a random order
  */
-static void slv_make_order( JsonObject exercise ) {
-    JsonArray tokens = exercise["tokens_l2"];
-    int n = 0;
+static void slv_make_order( int ex_idx, JsonObject exercise ) {
+    char cand[ SLV_MAX_CAND ][ SLV_TOKEN_LEN ];
+    char other_words[ SLV_MAX_TOKENS ][ SLV_TOKEN_LEN ];
+    int cand_cnt = 0;
+    int n = slv_order_words( exercise["tokens_l2"], slv_q.word );
 
     slv_q.kind = SLV_KIND_ORDER;
-    slovingo_sanitize( exercise["l1"] | "", slv_q.prompt, sizeof( slv_q.prompt ) );
-    snprintf( slv_q.hint, sizeof( slv_q.hint ), "%s", TXT_ORDER );
-
-    for ( JsonVariant token : tokens ) {
-        if ( n >= SLV_MAX_TOKENS )
-            break;
-        slovingo_sanitize( token.as<const char*>() ? token.as<const char*>() : "", slv_q.word[ n ], SLV_TOKEN_LEN );
-        n++;
-    }
     slv_q.word_cnt = n;
+    slovingo_sanitize( exercise["l1"] | "", slv_q.prompt, sizeof( slv_q.prompt ) );
+    snprintf( slv_q.hint, sizeof( slv_q.hint ), "%s (%d)", TXT_ORDER, n );
 
     for ( int k = 0; k < n; k++ )
-        slv_q.perm[ k ] = k;
-    /* shuffle, and try again if the order came out unchanged */
+        memcpy( slv_q.shown[ k ], slv_q.word[ k ], SLV_TOKEN_LEN );
+    slv_q.shown_cnt = n;
+
+    /* candidates for the distractors: words of the other sentences, not used in this one */
+    int pos = 0;
+    JsonArray exercises = (*slv_ex)["exercises"];
+    for ( JsonObject other : exercises ) {
+        if ( pos++ == ex_idx || cand_cnt >= SLV_MAX_CAND || strcmp( other["type"] | "", "order" ) )
+            continue;
+        int on = slv_order_words( other["tokens_l2"], other_words );
+        for ( int i = 0; i < on && cand_cnt < SLV_MAX_CAND; i++ ) {
+            bool known = false;
+            for ( int j = 0; j < n; j++ ) {
+                if ( !strcmp( slv_q.word[ j ], other_words[ i ] ) )
+                    known = true;
+            }
+            for ( int j = 0; j < cand_cnt; j++ ) {
+                if ( !strcmp( cand[ j ], other_words[ i ] ) )
+                    known = true;
+            }
+            if ( !known )
+                memcpy( cand[ cand_cnt++ ], other_words[ i ], SLV_TOKEN_LEN );
+        }
+    }
+    int wanted = n >= 5 ? 2 : ( n >= 3 ? 1 : 0 );
+    for ( int d = 0; d < wanted && cand_cnt > 0; d++ ) {
+        int r = SLV_RAND() % cand_cnt;
+        memcpy( slv_q.shown[ slv_q.shown_cnt++ ], cand[ r ], SLV_TOKEN_LEN );
+        memcpy( cand[ r ], cand[ --cand_cnt ], SLV_TOKEN_LEN );
+    }
+
+    /* shuffle, and try again if the words came out in the right order */
+    int total = slv_q.shown_cnt;
     for ( int attempt = 0; attempt < 4; attempt++ ) {
-        for ( int i = n - 1; i > 0; i-- ) {
+        for ( int i = total - 1; i > 0; i-- ) {
             int j = SLV_RAND() % ( i + 1 );
-            uint8_t tmp = slv_q.perm[ i ];
-            slv_q.perm[ i ] = slv_q.perm[ j ];
-            slv_q.perm[ j ] = tmp;
+            char tmp[ SLV_TOKEN_LEN ];
+            memcpy( tmp, slv_q.shown[ i ], SLV_TOKEN_LEN );
+            memcpy( slv_q.shown[ i ], slv_q.shown[ j ], SLV_TOKEN_LEN );
+            memcpy( slv_q.shown[ j ], tmp, SLV_TOKEN_LEN );
         }
-        bool identity = true;
-        for ( int k = 0; k < n; k++ ) {
-            if ( slv_q.perm[ k ] != k )
-                identity = false;
+        bool same = ( total == n );
+        for ( int k = 0; same && k < n; k++ ) {
+            if ( strcmp( slv_q.shown[ k ], slv_q.word[ k ] ) )
+                same = false;
         }
-        if ( !identity )
+        if ( !same )
             break;
     }
 }
@@ -498,13 +612,15 @@ static bool slv_is_playable( JsonObject exercise ) {
 
     if ( !strcmp( type, "qcm" ) || !strcmp( type, "fill-blank" ) )
         return( true );
-    if ( !strcmp( type, "order" ) ) {
-        JsonArray tokens = exercise["tokens_l2"];
-        return( tokens.size() >= 2 && tokens.size() <= SLV_MAX_TOKENS );
-    }
+    if ( !strcmp( type, "order" ) )
+        return( slv_order_words( exercise["tokens_l2"], NULL ) > 0 );
     return( false );
 }
 
+/*
+ * qcm: ask in one language, answer in the other, direction picked at random
+ * fill-blank: the target sentence with its missing word hidden
+ */
 static void slv_make_question( int ex_idx ) {
     JsonObject exercise = (*slv_ex)["exercises"][ ex_idx ];
     const char *type = exercise["type"] | "";
@@ -512,7 +628,7 @@ static void slv_make_question( int ex_idx ) {
     memset( &slv_q, 0, sizeof( slv_q ) );
 
     if ( !strcmp( type, "order" ) ) {
-        slv_make_order( exercise );
+        slv_make_order( ex_idx, exercise );
     }
     else if ( !strcmp( type, "fill-blank" ) ) {
         const char *sentence = exercise["l2"] | "";
@@ -609,7 +725,7 @@ static void slv_order_text( bool full, lv_color_t color ) {
     int n = full ? slv_q.word_cnt : slv_q.picked_cnt;
 
     for ( int j = 0; j < n; j++ ) {
-        const char *word = slv_q.word[ full ? j : slv_q.perm[ slv_q.picked[ j ] ] ];
+        const char *word = full ? slv_q.word[ j ] : slv_q.shown[ slv_q.picked[ j ] ];
         size_t wl = strlen( word );
         if ( len + wl + 2 > sizeof( text ) )
             break;
@@ -627,7 +743,7 @@ static void slv_order_text( bool full, lv_color_t color ) {
  * order: a tapped word leaves the list, the answer is checked when all the words are placed
  */
 static void slv_order_pick( int k ) {
-    if ( slv_q_answered || k < 0 || k >= slv_q.word_cnt || !slv_built_lbl )
+    if ( slv_q_answered || k < 0 || k >= slv_q.shown_cnt || !slv_built_lbl )
         return;
 
     slv_q.picked[ slv_q.picked_cnt++ ] = k;
@@ -640,7 +756,7 @@ static void slv_order_pick( int k ) {
     slv_q_answered = true;
     bool ok = true;
     for ( int j = 0; j < slv_q.word_cnt; j++ ) {
-        if ( slv_q.perm[ slv_q.picked[ j ] ] != j )
+        if ( strcmp( slv_q.shown[ slv_q.picked[ j ] ], slv_q.word[ j ] ) )
             ok = false;
     }
     if ( ok ) {
@@ -852,8 +968,21 @@ static void slv_show( slv_screen_t screen ) {
                 slv_add_label( slv_q.hint, false );
             if ( slv_q.kind == SLV_KIND_ORDER ) {
                 slv_built_lbl = slv_add_label( "", false );
-                for ( int k = 0; k < slv_q.word_cnt; k++ )
-                    slv_add_button( slv_q.word[ slv_q.perm[ k ] ] );
+                /* the words flow on several lines, each button as wide as its word */
+                lv_obj_t *flow = lv_cont_create( slv_page, NULL );
+                lv_cont_set_layout( flow, LV_LAYOUT_PRETTY_TOP );
+                lv_cont_set_fit2( flow, LV_FIT_NONE, LV_FIT_TIGHT );
+                lv_obj_set_width( flow, slv_content_w() );
+                lv_obj_set_style_local_bg_opa( flow, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_TRANSP );
+                lv_obj_set_style_local_border_width( flow, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+                lv_obj_set_style_local_pad_left( flow, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+                lv_obj_set_style_local_pad_right( flow, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+                lv_obj_set_style_local_pad_top( flow, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+                lv_obj_set_style_local_pad_bottom( flow, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, 0 );
+                lv_obj_set_style_local_pad_inner( flow, LV_CONT_PART_MAIN, LV_STATE_DEFAULT, SLV_ITEM_GAP );
+                for ( int k = 0; k < slv_q.shown_cnt; k++ )
+                    slv_add_chip( flow, slv_q.shown[ k ] );
+                lv_tileview_add_element( slv_tile, flow );
             }
             else {
                 for ( int i = 0; i < slv_q.choice_cnt; i++ )
