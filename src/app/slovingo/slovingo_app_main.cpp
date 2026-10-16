@@ -40,6 +40,8 @@
 #include "slovingo_app_main.h"
 #include "slovingo_config.h"
 #include "slovingo_fetch.h"
+#include "slovingo_progress.h"
+#include "slovingo_streak.h"
 
 #include "gui/mainbar/app_tile/app_tile.h"
 #include "gui/mainbar/main_tile/main_tile.h"
@@ -143,6 +145,7 @@ static uint8_t slv_theme_of( const char *key ) {
 #define TXT_COURSE          "Cours"
 #define TXT_CHOOSE_COURSE   "Choisis ton cours"
 #define TXT_OTHER_URL       "Autre adresse..."
+#define TXT_NO_COURSES      "Liste des cours indisponible (pas de r\xC3\xA9seau ?)"
 #define TXT_EMPTY_SHEET     "Fiche vide"
 #define TXT_HIDE_TRANSLATIONS "Cacher les traductions"
 #define TXT_SHOW_TRANSLATIONS "Afficher les traductions"
@@ -263,8 +266,7 @@ static char slv_req_path[ 96 ] = "index.json";
 static bool slv_req_force = false;
 
 /*
- * list of the courses: the one published by the Slovingo site (courses.json), then the
- * courses of the static list which it does not have yet
+ * list of the courses published by the Slovingo site (courses.json)
  */
 #define SLV_MAX_COURSES     16
 typedef struct {
@@ -283,6 +285,9 @@ static SpiRamJsonDocument *slv_res_doc = NULL;
  */
 static uint16_t slv_q_order[ SLV_MAX_Q ];
 static int slv_q_cnt = 0;
+static int slv_prev_best = -1;      /* best score of the sheet before this quiz */
+static bool slv_new_record = false;
+static int slv_streak = 0;          /* days in a row, as of the end of the last quiz */
 static int slv_q_pos = 0;
 static int slv_score = 0;
 static bool slv_q_answered = false;
@@ -566,8 +571,50 @@ static void slv_collect_sheets( int group ) {
     }
 }
 
+static int slv_best_of( JsonObject sheet );
+
+/* number of sheets done (best score from SLOVINGO_DONE_PCT) in each series */
+static void slv_count_done( int *done ) {
+    for ( int i = 0; i < slv_group_cnt; i++ )
+        done[ i ] = 0;
+    if ( !slv_index )
+        return;
+    for ( JsonObject sheet : (*slv_index)["sheets"].as<JsonArray>() ) {
+        if ( slv_best_of( sheet ) < SLOVINGO_DONE_PCT )
+            continue;
+        const char *cat = sheet["cat"] | "";
+        const char *sub = sheet["sub"] | "";
+        for ( int i = 0; i < slv_group_cnt; i++ ) {
+            if ( !strcmp( slv_groups[ i ].cat, cat ) && !strcmp( slv_groups[ i ].sub, sub ) ) {
+                done[ i ]++;
+                break;
+            }
+        }
+    }
+}
+
 static JsonObject slv_cur_sheet_obj( void ) {
     return( (*slv_index)["sheets"][ slv_cur_sheet ] );
+}
+
+/* best score of a sheet of the index (-1: never played) */
+static int slv_best_of( JsonObject sheet ) {
+    return( slovingo_progress_best( slovingo_config.url, sheet["id"] | "" ) );
+}
+
+/* colour of a score: green for a perfect one, gold from 70 %, white from 50 %, grey below */
+static const char *slv_best_color( int pct ) {
+    return( pct >= 100 ? "81C784" : pct >= 70 ? "FFD54F" : pct >= SLOVINGO_DONE_PCT ? "FFFFFF" : "B0B7C0" );
+}
+
+/* label of a button: the text may carry #RRGGBB colour# parts */
+static void slv_label_recolor( lv_obj_t *btn ) {
+    lv_obj_t *label = lv_obj_get_child( btn, NULL );
+
+    if ( label ) {
+        lv_label_set_recolor( label, true );
+        lv_label_set_text( label, lv_label_get_text( label ) );
+    }
 }
 
 /* position in index["sheets"] of the sheet before (dir -1) or after (dir 1) the current one, -1 if none.
@@ -1467,6 +1514,17 @@ static void slv_pick_cheer( void ) {
 static void slv_next_question( void ) {
     slv_q_pos++;
     if ( slv_q_pos >= slv_q_cnt ) {
+        if ( slv_q_cnt > 0 && slv_cur_sheet >= 0 ) {
+            const char *id = slv_cur_sheet_obj()["id"] | "";
+
+            slv_prev_best = slovingo_progress_best( slovingo_config.url, id );
+            slv_new_record = slovingo_progress_record( slovingo_config.url, id, slv_score * 100 / slv_q_cnt );
+        }
+        else {
+            slv_prev_best = -1;
+            slv_new_record = false;
+        }
+        slv_streak = slovingo_streak_record( slovingo_day_of( time( NULL ) ) );
         slv_pick_cheer();
         slv_goto( SCR_RESULT );
         return;
@@ -1486,7 +1544,7 @@ static bool slv_course_known( const char *id ) {
     return( false );
 }
 
-/* fill the list from courses.json (doc may be NULL: offline), then complete it with the static list */
+/* fill the list from courses.json (doc may be NULL: offline, the list stays empty) */
 static void slv_build_courses( JsonDocument *doc ) {
     slv_course_cnt = 0;
 
@@ -1509,18 +1567,6 @@ static void slv_build_courses( JsonDocument *doc ) {
             snprintf( c->url, sizeof( c->url ), "%s%.*s", SLOVINGO_LAUNCHER_URL, (int)len, api );
             slv_course_cnt++;
         }
-    }
-    for ( int i = 0; i < slovingo_course_count && slv_course_cnt < SLV_MAX_COURSES; i++ ) {
-        const char *id = slovingo_courses[ i ].repo;
-
-        if ( !strncmp( id, "Slovingo-", 9 ) )
-            id += 9;
-        if ( slv_course_known( id ) )
-            continue;
-        slv_course_t *c = &slv_course[ slv_course_cnt++ ];
-        snprintf( c->id, sizeof( c->id ), "%s", id );
-        snprintf( c->label, sizeof( c->label ), "%s", slovingo_courses[ i ].label );
-        slovingo_course_url( i, c->url, sizeof( c->url ) );
     }
 }
 
@@ -1632,6 +1678,53 @@ static void slv_lv_task( lv_task_t * task ) {
  * screens
  * ---------------------------------------------------------------------- */
 
+/*
+ * confetti: small coloured squares falling over the result screen of a perfect quiz.
+ * They are children of the tile (the page scrolls), do not take clicks, and are removed
+ * when the screen changes
+ */
+#define SLV_CONFETTI    28
+static lv_obj_t *slv_confetti[ SLV_CONFETTI ];
+static int slv_confetti_cnt = 0;
+
+static void slv_confetti_clear( void ) {
+    for ( int i = 0; i < slv_confetti_cnt; i++ ) {
+        lv_anim_del( slv_confetti[ i ], NULL );
+        lv_obj_del( slv_confetti[ i ] );
+    }
+    slv_confetti_cnt = 0;
+}
+
+static void slv_confetti_start( void ) {
+    static const uint32_t colors[] = { 0xFFD54F, 0xFF8A65, 0x81C784, 0x4FC3F7, 0xBA68C8, 0xF06292 };
+    lv_coord_t width = lv_obj_get_width( slv_tile );
+    lv_coord_t height = lv_obj_get_height( slv_tile );
+
+    slv_confetti_clear();
+    for ( int i = 0; i < SLV_CONFETTI; i++ ) {
+        lv_obj_t *piece = lv_obj_create( slv_tile, NULL );
+        int size = 5 + SLV_RAND() % 5;
+
+        lv_obj_set_size( piece, size, size + SLV_RAND() % 4 );
+        lv_obj_set_style_local_bg_color( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( colors[ SLV_RAND() % ( sizeof( colors ) / sizeof( colors[ 0 ] ) ) ] ) );
+        lv_obj_set_style_local_bg_opa( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER );
+        lv_obj_set_style_local_border_width( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0 );
+        lv_obj_set_style_local_radius( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 1 );
+        lv_obj_set_click( piece, false );
+        lv_obj_set_pos( piece, SLV_RAND() % ( width - size ), -12 );
+        slv_confetti[ slv_confetti_cnt++ ] = piece;
+
+        lv_anim_t anim;
+        lv_anim_init( &anim );
+        lv_anim_set_var( &anim, piece );
+        lv_anim_set_exec_cb( &anim, (lv_anim_exec_xcb_t)lv_obj_set_y );
+        lv_anim_set_values( &anim, -12, height );
+        lv_anim_set_delay( &anim, SLV_RAND() % 1200 );
+        lv_anim_set_time( &anim, 1400 + SLV_RAND() % 1400 );
+        lv_anim_start( &anim );
+    }
+}
+
 static void slv_goto( slv_screen_t screen ) {
     slv_pending_screen = screen;
     slv_pending = true;
@@ -1699,6 +1792,7 @@ static void slv_show( slv_screen_t screen ) {
     slv_url_textarea = NULL;
     slv_built_lbl = NULL;
     lv_page_clean( slv_page );
+    slv_confetti_clear();
 
     lv_obj_set_hidden( slv_refresh_btn, !( screen == SCR_GROUPS || screen == SCR_ERROR ) );
     lv_obj_set_hidden( slv_setup_btn, screen != SCR_GROUPS );
@@ -1744,8 +1838,13 @@ static void slv_show( slv_screen_t screen ) {
                 slv_add_head( &slv_fox_neutral_40, text, false, *trans != '\0' );
             }
             slv_add_label( slv_index ? ( (*slv_index)["title"] | TXT_COURSE ) : TXT_COURSE, true );
+            int done[ SLV_MAX_GROUPS ];
+            slv_count_done( done );
             for ( int i = 0; i < slv_group_cnt; i++ ) {
-                snprintf( text, sizeof( text ), "%s (%d)", slv_groups[ i ].label, slv_groups[ i ].count );
+                if ( done[ i ] > 0 )
+                    snprintf( text, sizeof( text ), "%s (%d/%d)", slv_groups[ i ].label, done[ i ], slv_groups[ i ].count );
+                else
+                    snprintf( text, sizeof( text ), "%s (%d)", slv_groups[ i ].label, slv_groups[ i ].count );
                 slv_add_button_icon( text, slv_themes[ slv_groups[ i ].theme ].img, slv_themes[ slv_groups[ i ].theme ].color );
             }
             break;
@@ -1761,7 +1860,16 @@ static void slv_show( slv_screen_t screen ) {
                 slv_add_head( slv_themes[ theme ].img, head, true, false );
                 for ( int i = 0; i < slv_sheet_cnt; i++ ) {
                     JsonObject sheet = (*slv_index)["sheets"][ slv_sheet_idx[ i ] ];
-                    slv_tint( slv_add_button( sheet["title"] | "?" ), slv_themes[ theme ].color );
+                    int best = slv_best_of( sheet );
+                    if ( best >= 0 ) {
+                        snprintf( text, sizeof( text ), "%s  #%s %d%%#", (const char*)( sheet["title"] | "?" ), slv_best_color( best ), best );
+                        lv_obj_t *btn = slv_add_button( text );
+                        slv_label_recolor( btn );
+                        slv_tint( btn, slv_themes[ theme ].color );
+                    }
+                    else {
+                        slv_tint( slv_add_button( sheet["title"] | "?" ), slv_themes[ theme ].color );
+                    }
                 }
             }
             break;
@@ -1772,6 +1880,11 @@ static void slv_show( slv_screen_t screen ) {
 
             slovingo_sanitize( sheet["title"] | "?", text, sizeof( text ) );
             slv_add_head( &slv_fox_neutral_40, text, false, false );
+            int best = slv_best_of( sheet );
+            if ( best >= 0 ) {
+                snprintf( text, sizeof( text ), "Meilleur score : #%s %d %%#", slv_best_color( best ), best );
+                lv_label_set_recolor( slv_add_label( text, false ), true );
+            }
             slv_tint( slv_add_button( TXT_READ ), 0x1F4E79 );
             if ( playable > 0 ) {
                 snprintf( text, sizeof( text ), "%s (%d)", TXT_EXERCISES, playable );
@@ -1830,6 +1943,18 @@ static void slv_show( slv_screen_t screen ) {
             }
             snprintf( text, sizeof( text ), "Score : %d / %d", slv_score, slv_q_cnt );
             slv_add_label( text, false );
+            if ( slv_new_record && slv_prev_best >= 0 )
+                lv_label_set_recolor( slv_add_label( "#FFD54F Nouveau record !#", false ), true );
+            else if ( slv_prev_best >= 0 ) {
+                snprintf( text, sizeof( text ), "Record : %d %%", slv_prev_best );
+                slv_add_label( text, false );
+            }
+            if ( slv_streak >= 2 ) {
+                snprintf( text, sizeof( text ), "#FFB74D %d jours de suite !#", slv_streak );
+                lv_label_set_recolor( slv_add_label( text, false ), true );
+            }
+            if ( pct >= 100 )
+                slv_confetti_start();
             slv_add_button( TXT_AGAIN );
             if ( slv_neighbor_sheet( 1 ) >= 0 )
                 slv_add_button( TXT_NEXT_SHEET );
@@ -1839,6 +1964,8 @@ static void slv_show( slv_screen_t screen ) {
 
         case SCR_COURSES:
             slv_add_label( TXT_CHOOSE_COURSE, true );
+            if ( !slv_course_cnt )
+                slv_add_label( TXT_NO_COURSES, false );
             for ( int i = 0; i < slv_course_cnt; i++ )
                 slv_add_button( slv_course[ i ].label );
             slv_add_button( TXT_OTHER_URL );
@@ -1892,9 +2019,7 @@ static void slv_open_data( slv_req_t req ) {
 
 /* the list of the courses is downloaded once per start, then the screen is shown */
 static void slv_open_courses( void ) {
-    if ( slv_courses_tried || slv_busy ) {
-        if ( !slv_course_cnt )
-            slv_build_courses( NULL );
+    if ( ( slv_courses_tried && slv_course_cnt ) || slv_busy ) {
         slv_goto( SCR_COURSES );
         return;
     }
@@ -2103,6 +2228,7 @@ static void slv_app_activate_cb( void ) {
 
 static void slv_app_hibernate_cb( void ) {
     keyboard_hide();
+    slv_confetti_clear();
     slv_advance_at = 0;
     slv_hold_screen( false );
 

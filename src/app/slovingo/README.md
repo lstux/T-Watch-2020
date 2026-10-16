@@ -24,10 +24,8 @@ the app (setup button, bottom right), which opens the course list.
 
 The first start shows "Choisis ton cours". The list comes from
 `https://lstux.github.io/Slovingo/courses.json` (each course has an `api` link to its export), downloaded
-once per start and kept in the cache. The courses of the static list in `slovingo_config.cpp`
-(`slovingo_courses[]`, the repositories `lstux/Slovingo-xx-xx*`) that courses.json does not have
-are added after them, and are the whole list when the site cannot be reached.
-"Autre adresse..." at the end of the list keeps the free `url` field. Each course has its own
+once per start and kept in the cache, so it also works offline once seen. If it cannot be
+reached and is not cached, the list is empty and only the free address is left. "Autre adresse..." at the end of the list keeps the free `url` field. Each course has its own
 cache (the cache file is named after the url).
 
 | key         | default                                                  | meaning                      |
@@ -87,3 +85,20 @@ fox and rabbit sprites (needs Pillow and DejaVu Sans).
 
 The app is built for every board except the small flash ones, where `support/apps_off.py`
 leaves it out (`NOT_ESSENTIAL`).
+
+## Progress
+
+The best score of each sheet is kept in `/slovingo_progress.json` on the SPIFFS (about 16 bytes a
+sheet, a hash of the course url and of the sheet id is the key). The file is written only at the end
+of a quiz, and only when the score beats the old one. The sheet list shows the best score
+(green at 100 %, gold from 70 %, white from 50 %, grey below), the series list shows
+"sheets done/sheets" (done = 50 % or more), the sheet menu shows "Meilleur score" and the result
+screen tells "Nouveau record !" or the record to beat. A course reached by another address
+(for example the old `Slovingo-xx-xx` pages) has its own progress.
+
+## Confetti and days in a row
+
+A perfect quiz (100 %) lets confetti fall over the result screen. The days in a row are counted
+in `/slovingo_streak.json` (last day played and streak, written at most once a day): playing the
+day after the last one adds a day, a missed day starts again at 1. From 2 days the result screen
+says "N jours de suite !". It needs the clock of the watch to be set (time sync), otherwise nothing is counted.
