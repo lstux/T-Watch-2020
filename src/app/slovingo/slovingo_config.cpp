@@ -22,23 +22,6 @@
 
 #include "slovingo_config.h"
 
-const slovingo_course_t slovingo_courses[] = {
-    { "SK > FR enfants",   "Slovingo-sk-fr-kids" },
-    { "SK > FR amis",      "Slovingo-sk-fr-friends" },
-    { "SK > FR",           "Slovingo-sk-fr" },
-    { "FR > SK enfants",   "Slovingo-fr-sk-kids" },
-    { "FR > SK",           "Slovingo-fr-sk" },
-    { "DE > FR enfants",   "Slovingo-de-fr-kids" },
-};
-const int slovingo_course_count = sizeof( slovingo_courses ) / sizeof( slovingo_courses[ 0 ] );
-
-void slovingo_course_url( int course, char *url, size_t len ) {
-    if ( course < 0 || course >= slovingo_course_count )
-        snprintf( url, len, "%s", SLOVINGO_DEFAULT_URL );
-    else
-        snprintf( url, len, "%s%s%s", SLOVINGO_URL_PREFIX, slovingo_courses[ course ].repo, SLOVINGO_URL_SUFFIX );
-}
-
 slovingo_config_t::slovingo_config_t() : BaseJsonConfig( SLOVINGO_JSON_CONFIG_FILE ) {
 }
 

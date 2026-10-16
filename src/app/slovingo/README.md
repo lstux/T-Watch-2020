@@ -24,10 +24,8 @@ the app (setup button, bottom right), which opens the course list.
 
 The first start shows "Choisis ton cours". The list comes from
 `https://lstux.github.io/Slovingo/courses.json` (each course has an `api` link to its export), downloaded
-once per start and kept in the cache. The courses of the static list in `slovingo_config.cpp`
-(`slovingo_courses[]`, the repositories `lstux/Slovingo-xx-xx*`) that courses.json does not have
-are added after them, and are the whole list when the site cannot be reached.
-"Autre adresse..." at the end of the list keeps the free `url` field. Each course has its own
+once per start and kept in the cache, so it also works offline once seen. If it cannot be
+reached and is not cached, the list is empty and only the free address is left. "Autre adresse..." at the end of the list keeps the free `url` field. Each course has its own
 cache (the cache file is named after the url).
 
 | key         | default                                                  | meaning                      |

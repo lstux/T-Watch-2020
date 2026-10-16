@@ -23,27 +23,14 @@
     #include "utils/basejsonconfig.h"
 
     #define SLOVINGO_JSON_CONFIG_FILE   "/slovingo.json"    /** @brief defines json config file name */
-    #define SLOVINGO_DEFAULT_URL        "https://lstux.github.io/Slovingo-sk-fr-kids/api/"
+    #define SLOVINGO_DEFAULT_URL        "https://lstux.github.io/Slovingo/sk-fr-kids/api/"
     #define SLOVINGO_URL_LEN            160
     #define SLOVINGO_QUESTIONS_DEFAULT  10
     #define SLOVINGO_QUESTIONS_MAX      30
     #define SLOVINGO_NAME_LEN           24
     #define SLOVINGO_DEFAULT_NAME       "L\xC3\xAD\xC5\xA1ka"      /** @brief "Liska" (fox), what [USER_NAME] stands for in the course */
 
-    #define SLOVINGO_URL_PREFIX         "https://lstux.github.io/"
-    #define SLOVINGO_URL_SUFFIX         "/api/"
     #define SLOVINGO_LAUNCHER_URL       "https://lstux.github.io/Slovingo/"   /** @brief site of the engine: courses.json lists the courses */
-
-    /** @brief a course of the static list: name on the screen and name of its repository (GitHub Pages) */
-    struct slovingo_course_t {
-        const char *label;
-        const char *repo;
-    };
-    extern const slovingo_course_t slovingo_courses[];
-    extern const int slovingo_course_count;
-
-    /** @brief build the export folder url of a course of the list */
-    void slovingo_course_url( int course, char *url, size_t len );
 
     /**
      * @brief slovingo config structure

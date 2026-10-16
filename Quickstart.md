@@ -25,7 +25,7 @@ cp conf/weather.json.example  data/weather.json     # facultatif
 
 | Fichier (sur la montre) | Ce qu'on y règle |
 |---|---|
-| `slovingo.json` | `url` : dossier `api/` du cours (par défaut `https://lstux.github.io/Slovingo-sk-fr-kids/api/`), `questions` : nombre de questions par série d'exercices, `name` : prénom affiché à la place de `[USER_NAME]` dans les dialogues (par défaut `Líška`) |
+| `slovingo.json` | `url` : dossier `api/` du cours (par défaut `https://lstux.github.io/Slovingo/sk-fr-kids/api/`), `questions` : nombre de questions par série d'exercices, `name` : prénom affiché à la place de `[USER_NAME]` dans les dialogues (par défaut `Líška`) |
 | `wificfg.json` | `networklist` : `ssid` et `psk` de tes réseaux (jusqu'à 20), `hostname`, `ftpserver` / `ftpuser` / `ftppass`, `webserver`, `mqtt*` |
 | `weather.json` | `apikey` OpenWeatherMap, `lat`, `lon` |
 
@@ -61,7 +61,7 @@ python ~/.platformio/packages/tool-esptoolpy/esptool.py --port <PORT> --baud 921
 ## 5. Vérifier que le cours est en ligne
 
 ```bash
-curl -s https://lstux.github.io/Slovingo-sk-fr-kids/api/index.json | head -c 200
+curl -s https://lstux.github.io/Slovingo/sk-fr-kids/api/index.json | head -c 200
 ```
 
 Puis sur la montre : Wi-Fi activé, app **slovingo** (groupe Général). Un cours déjà ouvert est

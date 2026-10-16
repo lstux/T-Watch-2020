@@ -143,6 +143,7 @@ static uint8_t slv_theme_of( const char *key ) {
 #define TXT_COURSE          "Cours"
 #define TXT_CHOOSE_COURSE   "Choisis ton cours"
 #define TXT_OTHER_URL       "Autre adresse..."
+#define TXT_NO_COURSES      "Liste des cours indisponible (pas de r\xC3\xA9seau ?)"
 #define TXT_EMPTY_SHEET     "Fiche vide"
 #define TXT_HIDE_TRANSLATIONS "Cacher les traductions"
 #define TXT_SHOW_TRANSLATIONS "Afficher les traductions"
@@ -263,8 +264,7 @@ static char slv_req_path[ 96 ] = "index.json";
 static bool slv_req_force = false;
 
 /*
- * list of the courses: the one published by the Slovingo site (courses.json), then the
- * courses of the static list which it does not have yet
+ * list of the courses published by the Slovingo site (courses.json)
  */
 #define SLV_MAX_COURSES     16
 typedef struct {
@@ -1486,7 +1486,7 @@ static bool slv_course_known( const char *id ) {
     return( false );
 }
 
-/* fill the list from courses.json (doc may be NULL: offline), then complete it with the static list */
+/* fill the list from courses.json (doc may be NULL: offline, the list stays empty) */
 static void slv_build_courses( JsonDocument *doc ) {
     slv_course_cnt = 0;
 
@@ -1509,18 +1509,6 @@ static void slv_build_courses( JsonDocument *doc ) {
             snprintf( c->url, sizeof( c->url ), "%s%.*s", SLOVINGO_LAUNCHER_URL, (int)len, api );
             slv_course_cnt++;
         }
-    }
-    for ( int i = 0; i < slovingo_course_count && slv_course_cnt < SLV_MAX_COURSES; i++ ) {
-        const char *id = slovingo_courses[ i ].repo;
-
-        if ( !strncmp( id, "Slovingo-", 9 ) )
-            id += 9;
-        if ( slv_course_known( id ) )
-            continue;
-        slv_course_t *c = &slv_course[ slv_course_cnt++ ];
-        snprintf( c->id, sizeof( c->id ), "%s", id );
-        snprintf( c->label, sizeof( c->label ), "%s", slovingo_courses[ i ].label );
-        slovingo_course_url( i, c->url, sizeof( c->url ) );
     }
 }
 
@@ -1839,6 +1827,8 @@ static void slv_show( slv_screen_t screen ) {
 
         case SCR_COURSES:
             slv_add_label( TXT_CHOOSE_COURSE, true );
+            if ( !slv_course_cnt )
+                slv_add_label( TXT_NO_COURSES, false );
             for ( int i = 0; i < slv_course_cnt; i++ )
                 slv_add_button( slv_course[ i ].label );
             slv_add_button( TXT_OTHER_URL );
@@ -1892,9 +1882,7 @@ static void slv_open_data( slv_req_t req ) {
 
 /* the list of the courses is downloaded once per start, then the screen is shown */
 static void slv_open_courses( void ) {
-    if ( slv_courses_tried || slv_busy ) {
-        if ( !slv_course_cnt )
-            slv_build_courses( NULL );
+    if ( ( slv_courses_tried && slv_course_cnt ) || slv_busy ) {
         slv_goto( SCR_COURSES );
         return;
     }
