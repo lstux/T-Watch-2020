@@ -172,6 +172,7 @@ typedef enum {
 } slv_screen_t;
 
 typedef enum {
+    REQ_COURSES,
     REQ_INDEX,
     REQ_SHEET,
     REQ_EXERCISES
@@ -260,6 +261,20 @@ static volatile bool slv_done = false;
 static slv_req_t slv_req = REQ_INDEX;
 static char slv_req_path[ 96 ] = "index.json";
 static bool slv_req_force = false;
+
+/*
+ * list of the courses: the one published by the Slovingo site (courses.json), then the
+ * courses of the static list which it does not have yet
+ */
+#define SLV_MAX_COURSES     16
+typedef struct {
+    char id[ 32 ];
+    char label[ 48 ];
+    char url[ SLOVINGO_URL_LEN ];
+} slv_course_t;
+static slv_course_t slv_course[ SLV_MAX_COURSES ];
+static int slv_course_cnt = 0;
+static bool slv_courses_tried = false;
 static slovingo_result_t slv_res = SLOVINGO_OK;
 static SpiRamJsonDocument *slv_res_doc = NULL;
 
@@ -284,6 +299,7 @@ static slv_question_t slv_q;
 static void slv_show( slv_screen_t screen );
 static void slv_goto( slv_screen_t screen );
 static void slv_load_course( void );
+static void slv_open_courses( void );
 static void slv_request( slv_req_t req, const char *path, bool force );
 static void slv_app_activate_cb( void );
 static void slv_app_hibernate_cb( void );
@@ -353,8 +369,13 @@ static lv_obj_t *slv_add_button( const char *text ) {
 
 /* colour of a button, 0 keeps the one of the theme of the watch */
 static void slv_tint( lv_obj_t *btn, uint32_t color ) {
-    if ( color )
-        lv_obj_set_style_local_bg_color( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( color ) );
+    if ( !color )
+        return;
+    lv_obj_set_style_local_bg_color( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( color ) );
+    /* the colours are dark: the text is always white, whatever the theme of the watch */
+    lv_obj_set_style_local_text_color( btn, LV_BTN_PART_MAIN, LV_STATE_DEFAULT, LV_COLOR_WHITE );
+    lv_obj_set_style_local_text_color( btn, LV_BTN_PART_MAIN, LV_STATE_PRESSED, LV_COLOR_WHITE );
+    lv_obj_set_style_local_text_color( btn, LV_BTN_PART_MAIN, LV_STATE_FOCUSED, LV_COLOR_WHITE );
 }
 
 /* button with a pictogram at its left, the text beside it */
@@ -1458,10 +1479,55 @@ static void slv_next_question( void ) {
  * worker
  * ---------------------------------------------------------------------- */
 
+static bool slv_course_known( const char *id ) {
+    for ( int i = 0; i < slv_course_cnt; i++ )
+        if ( !strcmp( slv_course[ i ].id, id ) )
+            return( true );
+    return( false );
+}
+
+/* fill the list from courses.json (doc may be NULL: offline), then complete it with the static list */
+static void slv_build_courses( JsonDocument *doc ) {
+    slv_course_cnt = 0;
+
+    if ( doc ) {
+        for ( JsonObject entry : (*doc)["courses"].as<JsonArray>() ) {
+            const char *id = entry["id"] | "";
+            const char *api = entry["api"] | "";
+            const char *title = entry["title"] | "";
+            size_t len = strlen( api );
+
+            if ( slv_course_cnt >= SLV_MAX_COURSES || !*id || !len || slv_course_known( id ) )
+                continue;
+            if ( len >= 10 && !strcmp( api + len - 10, "index.json" ) )
+                len -= 10;      /* the url of a course is its folder */
+            slv_course_t *c = &slv_course[ slv_course_cnt ];
+            if ( strlen( SLOVINGO_LAUNCHER_URL ) + len >= sizeof( c->url ) )
+                continue;
+            snprintf( c->id, sizeof( c->id ), "%s", id );
+            slovingo_sanitize( *title ? title : id, c->label, sizeof( c->label ) );
+            snprintf( c->url, sizeof( c->url ), "%s%.*s", SLOVINGO_LAUNCHER_URL, (int)len, api );
+            slv_course_cnt++;
+        }
+    }
+    for ( int i = 0; i < slovingo_course_count && slv_course_cnt < SLV_MAX_COURSES; i++ ) {
+        const char *id = slovingo_courses[ i ].repo;
+
+        if ( !strncmp( id, "Slovingo-", 9 ) )
+            id += 9;
+        if ( slv_course_known( id ) )
+            continue;
+        slv_course_t *c = &slv_course[ slv_course_cnt++ ];
+        snprintf( c->id, sizeof( c->id ), "%s", id );
+        snprintf( c->label, sizeof( c->label ), "%s", slovingo_courses[ i ].label );
+        slovingo_course_url( i, c->url, sizeof( c->url ) );
+    }
+}
+
 static void slv_worker( void *arg ) {
     SpiRamJsonDocument *doc = NULL;
 
-    slv_res = slovingo_fetch_json( slovingo_config.url, slv_req_path, slv_req_force, &doc );
+    slv_res = slovingo_fetch_json( slv_req == REQ_COURSES ? SLOVINGO_LAUNCHER_URL : slovingo_config.url, slv_req_path, slv_req_force, &doc );
     slv_res_doc = doc;
     slv_done = true;
 #ifndef NATIVE_64BIT
@@ -1521,6 +1587,14 @@ static void slv_lv_task( lv_task_t * task ) {
     SpiRamJsonDocument *doc = slv_res_doc;
     slv_res_doc = NULL;
 
+    if ( slv_req == REQ_COURSES ) {
+        /* no list online: the static one does */
+        slv_build_courses( slv_res == SLOVINGO_OK ? doc : NULL );
+        delete doc;
+        slv_show( SCR_COURSES );
+        return;
+    }
+
     if ( slv_res != SLOVINGO_OK || !doc ) {
         delete doc;
         snprintf( slv_error_text, sizeof( slv_error_text ), "%s", slovingo_result_text( slv_res ) );
@@ -1529,6 +1603,7 @@ static void slv_lv_task( lv_task_t * task ) {
     }
 
     switch ( slv_req ) {
+        case REQ_COURSES:       break;
         case REQ_INDEX:         delete slv_index;
                                 slv_index = doc;
                                 slv_build_groups();
@@ -1764,8 +1839,8 @@ static void slv_show( slv_screen_t screen ) {
 
         case SCR_COURSES:
             slv_add_label( TXT_CHOOSE_COURSE, true );
-            for ( int i = 0; i < slovingo_course_count; i++ )
-                slv_add_button( slovingo_courses[ i ].label );
+            for ( int i = 0; i < slv_course_cnt; i++ )
+                slv_add_button( slv_course[ i ].label );
             slv_add_button( TXT_OTHER_URL );
             break;
 
@@ -1813,6 +1888,18 @@ static void slv_open_data( slv_req_t req ) {
 
     snprintf( path, sizeof( path ), "%s/%s.json", req == REQ_SHEET ? "sheets" : "exercises", (const char*)( sheet["id"] | "" ) );
     slv_request( req, path, false );
+}
+
+/* the list of the courses is downloaded once per start, then the screen is shown */
+static void slv_open_courses( void ) {
+    if ( slv_courses_tried || slv_busy ) {
+        if ( !slv_course_cnt )
+            slv_build_courses( NULL );
+        slv_goto( SCR_COURSES );
+        return;
+    }
+    slv_courses_tried = true;
+    slv_request( REQ_COURSES, "courses.json", false );
 }
 
 /* the url of the config is the course to load: forget the current one and fetch its index */
@@ -1865,11 +1952,11 @@ static void slv_item_event_cb( lv_obj_t * obj, lv_event_t event ) {
                                 slv_goto( SCR_SHEET );
                             }
                             break;
-        case SCR_COURSES:   if ( item >= slovingo_course_count ) {
+        case SCR_COURSES:   if ( item >= slv_course_cnt ) {
                                 slv_goto( SCR_SETUP );
                                 break;
                             }
-                            slovingo_course_url( item, slovingo_config.url, sizeof( slovingo_config.url ) );
+                            snprintf( slovingo_config.url, sizeof( slovingo_config.url ), "%s", slv_course[ item ].url );
                             slv_load_course();
                             break;
         case SCR_SETUP:     if ( item == 0 ) {
@@ -1905,7 +1992,7 @@ static void slv_back_event_cb( lv_obj_t * obj, lv_event_t event ) {
         case SCR_QUIZ:
         case SCR_RESULT:    slv_goto( SCR_SHEET );
                             break;
-        case SCR_SETUP:     slv_goto( SCR_COURSES );
+        case SCR_SETUP:     slv_open_courses();
                             break;
         case SCR_COURSES:   if ( slv_index )
                                 slv_goto( SCR_GROUPS );
@@ -1913,7 +2000,7 @@ static void slv_back_event_cb( lv_obj_t * obj, lv_event_t event ) {
                                 mainbar_jump_back();
                             break;
         case SCR_ERROR:     if ( !slv_index )
-                                slv_goto( SCR_COURSES );
+                                slv_open_courses();
                             else
                                 slv_goto( slv_screen_before_load == SCR_LOADING ? SCR_GROUPS : slv_screen_before_load );
                             break;
@@ -1934,7 +2021,7 @@ static void slv_setup_event_cb( lv_obj_t * obj, lv_event_t event ) {
     if ( event != LV_EVENT_CLICKED )
         return;
     if ( slv_screen == SCR_GROUPS )
-        slv_goto( SCR_COURSES );
+        slv_open_courses();
 }
 
 /* open the reader on the next sheet; if the download fails the way back is the menu of that sheet */
@@ -2003,7 +2090,7 @@ static void slv_app_activate_cb( void ) {
     lv_task_set_prio( slv_task, LV_TASK_PRIO_MID );
 
     if ( !slv_index && !slv_busy && !slovingo_config.chosen ) {
-        slv_goto( SCR_COURSES );
+        slv_open_courses();
     }
     else if ( !slv_index && !slv_busy && slv_screen != SCR_COURSES && slv_screen != SCR_SETUP ) {
         slv_screen = SCR_GROUPS;
@@ -2046,7 +2133,7 @@ static void slv_app_hibernate_cb( void ) {
     else if ( slv_screen == SCR_READER || slv_screen == SCR_QUIZ || slv_screen == SCR_RESULT )
         slv_goto( SCR_SHEET );
     else if ( slv_screen == SCR_SETUP )
-        slv_goto( SCR_COURSES );
+        slv_open_courses();
 }
 
 void slovingo_app_main_setup( uint32_t tile_num ) {
