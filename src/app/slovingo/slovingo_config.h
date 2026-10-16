@@ -32,6 +32,7 @@
 
     #define SLOVINGO_URL_PREFIX         "https://lstux.github.io/"
     #define SLOVINGO_URL_SUFFIX         "/api/"
+    #define SLOVINGO_LAUNCHER_URL       "https://lstux.github.io/Slovingo/"   /** @brief site of the engine: courses.json lists the courses */
 
     /** @brief a course of the static list: name on the screen and name of its repository (GitHub Pages) */
     struct slovingo_course_t {

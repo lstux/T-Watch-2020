@@ -22,8 +22,11 @@ so a course already opened keeps working without wifi. Refresh (bottom middle) f
 `/slovingo.json` on the SPIFFS, see `conf/slovingo.json.example`. It can also be changed from
 the app (setup button, bottom right), which opens the course list.
 
-The first start shows "Choisis ton cours": a static list in `slovingo_config.cpp`
-(`slovingo_courses[]`, the repositories `lstux/Slovingo-xx-xx*` published on GitHub Pages).
+The first start shows "Choisis ton cours". The list comes from
+`https://lstux.github.io/Slovingo/courses.json` (each course has an `api` link to its export), downloaded
+once per start and kept in the cache. The courses of the static list in `slovingo_config.cpp`
+(`slovingo_courses[]`, the repositories `lstux/Slovingo-xx-xx*`) that courses.json does not have
+are added after them, and are the whole list when the site cannot be reached.
 "Autre adresse..." at the end of the list keeps the free `url` field. Each course has its own
 cache (the cache file is named after the url).
 
