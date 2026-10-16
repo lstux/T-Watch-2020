@@ -40,6 +40,7 @@
 #include "slovingo_app_main.h"
 #include "slovingo_config.h"
 #include "slovingo_fetch.h"
+#include "slovingo_progress.h"
 
 #include "gui/mainbar/app_tile/app_tile.h"
 #include "gui/mainbar/main_tile/main_tile.h"
@@ -283,6 +284,8 @@ static SpiRamJsonDocument *slv_res_doc = NULL;
  */
 static uint16_t slv_q_order[ SLV_MAX_Q ];
 static int slv_q_cnt = 0;
+static int slv_prev_best = -1;      /* best score of the sheet before this quiz */
+static bool slv_new_record = false;
 static int slv_q_pos = 0;
 static int slv_score = 0;
 static bool slv_q_answered = false;
@@ -566,8 +569,50 @@ static void slv_collect_sheets( int group ) {
     }
 }
 
+static int slv_best_of( JsonObject sheet );
+
+/* number of sheets done (best score from SLOVINGO_DONE_PCT) in each series */
+static void slv_count_done( int *done ) {
+    for ( int i = 0; i < slv_group_cnt; i++ )
+        done[ i ] = 0;
+    if ( !slv_index )
+        return;
+    for ( JsonObject sheet : (*slv_index)["sheets"].as<JsonArray>() ) {
+        if ( slv_best_of( sheet ) < SLOVINGO_DONE_PCT )
+            continue;
+        const char *cat = sheet["cat"] | "";
+        const char *sub = sheet["sub"] | "";
+        for ( int i = 0; i < slv_group_cnt; i++ ) {
+            if ( !strcmp( slv_groups[ i ].cat, cat ) && !strcmp( slv_groups[ i ].sub, sub ) ) {
+                done[ i ]++;
+                break;
+            }
+        }
+    }
+}
+
 static JsonObject slv_cur_sheet_obj( void ) {
     return( (*slv_index)["sheets"][ slv_cur_sheet ] );
+}
+
+/* best score of a sheet of the index (-1: never played) */
+static int slv_best_of( JsonObject sheet ) {
+    return( slovingo_progress_best( slovingo_config.url, sheet["id"] | "" ) );
+}
+
+/* colour of a score: green for a perfect one, gold from 70 %, white from 50 %, grey below */
+static const char *slv_best_color( int pct ) {
+    return( pct >= 100 ? "81C784" : pct >= 70 ? "FFD54F" : pct >= SLOVINGO_DONE_PCT ? "FFFFFF" : "B0B7C0" );
+}
+
+/* label of a button: the text may carry #RRGGBB colour# parts */
+static void slv_label_recolor( lv_obj_t *btn ) {
+    lv_obj_t *label = lv_obj_get_child( btn, NULL );
+
+    if ( label ) {
+        lv_label_set_recolor( label, true );
+        lv_label_set_text( label, lv_label_get_text( label ) );
+    }
 }
 
 /* position in index["sheets"] of the sheet before (dir -1) or after (dir 1) the current one, -1 if none.
@@ -1467,6 +1512,16 @@ static void slv_pick_cheer( void ) {
 static void slv_next_question( void ) {
     slv_q_pos++;
     if ( slv_q_pos >= slv_q_cnt ) {
+        if ( slv_q_cnt > 0 && slv_cur_sheet >= 0 ) {
+            const char *id = slv_cur_sheet_obj()["id"] | "";
+
+            slv_prev_best = slovingo_progress_best( slovingo_config.url, id );
+            slv_new_record = slovingo_progress_record( slovingo_config.url, id, slv_score * 100 / slv_q_cnt );
+        }
+        else {
+            slv_prev_best = -1;
+            slv_new_record = false;
+        }
         slv_pick_cheer();
         slv_goto( SCR_RESULT );
         return;
@@ -1732,8 +1787,13 @@ static void slv_show( slv_screen_t screen ) {
                 slv_add_head( &slv_fox_neutral_40, text, false, *trans != '\0' );
             }
             slv_add_label( slv_index ? ( (*slv_index)["title"] | TXT_COURSE ) : TXT_COURSE, true );
+            int done[ SLV_MAX_GROUPS ];
+            slv_count_done( done );
             for ( int i = 0; i < slv_group_cnt; i++ ) {
-                snprintf( text, sizeof( text ), "%s (%d)", slv_groups[ i ].label, slv_groups[ i ].count );
+                if ( done[ i ] > 0 )
+                    snprintf( text, sizeof( text ), "%s (%d/%d)", slv_groups[ i ].label, done[ i ], slv_groups[ i ].count );
+                else
+                    snprintf( text, sizeof( text ), "%s (%d)", slv_groups[ i ].label, slv_groups[ i ].count );
                 slv_add_button_icon( text, slv_themes[ slv_groups[ i ].theme ].img, slv_themes[ slv_groups[ i ].theme ].color );
             }
             break;
@@ -1749,7 +1809,16 @@ static void slv_show( slv_screen_t screen ) {
                 slv_add_head( slv_themes[ theme ].img, head, true, false );
                 for ( int i = 0; i < slv_sheet_cnt; i++ ) {
                     JsonObject sheet = (*slv_index)["sheets"][ slv_sheet_idx[ i ] ];
-                    slv_tint( slv_add_button( sheet["title"] | "?" ), slv_themes[ theme ].color );
+                    int best = slv_best_of( sheet );
+                    if ( best >= 0 ) {
+                        snprintf( text, sizeof( text ), "%s  #%s %d%%#", (const char*)( sheet["title"] | "?" ), slv_best_color( best ), best );
+                        lv_obj_t *btn = slv_add_button( text );
+                        slv_label_recolor( btn );
+                        slv_tint( btn, slv_themes[ theme ].color );
+                    }
+                    else {
+                        slv_tint( slv_add_button( sheet["title"] | "?" ), slv_themes[ theme ].color );
+                    }
                 }
             }
             break;
@@ -1760,6 +1829,11 @@ static void slv_show( slv_screen_t screen ) {
 
             slovingo_sanitize( sheet["title"] | "?", text, sizeof( text ) );
             slv_add_head( &slv_fox_neutral_40, text, false, false );
+            int best = slv_best_of( sheet );
+            if ( best >= 0 ) {
+                snprintf( text, sizeof( text ), "Meilleur score : #%s %d %%#", slv_best_color( best ), best );
+                lv_label_set_recolor( slv_add_label( text, false ), true );
+            }
             slv_tint( slv_add_button( TXT_READ ), 0x1F4E79 );
             if ( playable > 0 ) {
                 snprintf( text, sizeof( text ), "%s (%d)", TXT_EXERCISES, playable );
@@ -1818,6 +1892,12 @@ static void slv_show( slv_screen_t screen ) {
             }
             snprintf( text, sizeof( text ), "Score : %d / %d", slv_score, slv_q_cnt );
             slv_add_label( text, false );
+            if ( slv_new_record && slv_prev_best >= 0 )
+                lv_label_set_recolor( slv_add_label( "#FFD54F Nouveau record !#", false ), true );
+            else if ( slv_prev_best >= 0 ) {
+                snprintf( text, sizeof( text ), "Record : %d %%", slv_prev_best );
+                slv_add_label( text, false );
+            }
             slv_add_button( TXT_AGAIN );
             if ( slv_neighbor_sheet( 1 ) >= 0 )
                 slv_add_button( TXT_NEXT_SHEET );

@@ -85,3 +85,13 @@ fox and rabbit sprites (needs Pillow and DejaVu Sans).
 
 The app is built for every board except the small flash ones, where `support/apps_off.py`
 leaves it out (`NOT_ESSENTIAL`).
+
+## Progress
+
+The best score of each sheet is kept in `/slovingo_progress.json` on the SPIFFS (about 16 bytes a
+sheet, a hash of the course url and of the sheet id is the key). The file is written only at the end
+of a quiz, and only when the score beats the old one. The sheet list shows the best score
+(green at 100 %, gold from 70 %, white from 50 %, grey below), the series list shows
+"sheets done/sheets" (done = 50 % or more), the sheet menu shows "Meilleur score" and the result
+screen tells "Nouveau record !" or the record to beat. A course reached by another address
+(for example the old `Slovingo-xx-xx` pages) has its own progress.
