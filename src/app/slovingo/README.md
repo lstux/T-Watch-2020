@@ -87,3 +87,10 @@ fox and rabbit sprites (needs Pillow and DejaVu Sans).
 
 The app is built for every board except the small flash ones, where `support/apps_off.py`
 leaves it out (`NOT_ESSENTIAL`).
+
+## Confetti and days in a row
+
+A perfect quiz (100 %) lets confetti fall over the result screen. The days in a row are counted
+in `/slovingo_streak.json` (last day played and streak, written at most once a day): playing the
+day after the last one adds a day, a missed day starts again at 1. From 2 days the result screen
+says "N jours de suite !". It needs the clock of the watch to be set (time sync), otherwise nothing is counted.

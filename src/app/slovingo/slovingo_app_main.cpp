@@ -40,6 +40,7 @@
 #include "slovingo_app_main.h"
 #include "slovingo_config.h"
 #include "slovingo_fetch.h"
+#include "slovingo_streak.h"
 
 #include "gui/mainbar/app_tile/app_tile.h"
 #include "gui/mainbar/main_tile/main_tile.h"
@@ -283,6 +284,7 @@ static SpiRamJsonDocument *slv_res_doc = NULL;
  */
 static uint16_t slv_q_order[ SLV_MAX_Q ];
 static int slv_q_cnt = 0;
+static int slv_streak = 0;          /* days in a row, as of the end of the last quiz */
 static int slv_q_pos = 0;
 static int slv_score = 0;
 static bool slv_q_answered = false;
@@ -1467,6 +1469,7 @@ static void slv_pick_cheer( void ) {
 static void slv_next_question( void ) {
     slv_q_pos++;
     if ( slv_q_pos >= slv_q_cnt ) {
+        slv_streak = slovingo_streak_record( slovingo_day_of( time( NULL ) ) );
         slv_pick_cheer();
         slv_goto( SCR_RESULT );
         return;
@@ -1632,6 +1635,53 @@ static void slv_lv_task( lv_task_t * task ) {
  * screens
  * ---------------------------------------------------------------------- */
 
+/*
+ * confetti: small coloured squares falling over the result screen of a perfect quiz.
+ * They are children of the tile (the page scrolls), do not take clicks, and are removed
+ * when the screen changes
+ */
+#define SLV_CONFETTI    28
+static lv_obj_t *slv_confetti[ SLV_CONFETTI ];
+static int slv_confetti_cnt = 0;
+
+static void slv_confetti_clear( void ) {
+    for ( int i = 0; i < slv_confetti_cnt; i++ ) {
+        lv_anim_del( slv_confetti[ i ], NULL );
+        lv_obj_del( slv_confetti[ i ] );
+    }
+    slv_confetti_cnt = 0;
+}
+
+static void slv_confetti_start( void ) {
+    static const uint32_t colors[] = { 0xFFD54F, 0xFF8A65, 0x81C784, 0x4FC3F7, 0xBA68C8, 0xF06292 };
+    lv_coord_t width = lv_obj_get_width( slv_tile );
+    lv_coord_t height = lv_obj_get_height( slv_tile );
+
+    slv_confetti_clear();
+    for ( int i = 0; i < SLV_CONFETTI; i++ ) {
+        lv_obj_t *piece = lv_obj_create( slv_tile, NULL );
+        int size = 5 + SLV_RAND() % 5;
+
+        lv_obj_set_size( piece, size, size + SLV_RAND() % 4 );
+        lv_obj_set_style_local_bg_color( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, lv_color_hex( colors[ SLV_RAND() % ( sizeof( colors ) / sizeof( colors[ 0 ] ) ) ] ) );
+        lv_obj_set_style_local_bg_opa( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, LV_OPA_COVER );
+        lv_obj_set_style_local_border_width( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 0 );
+        lv_obj_set_style_local_radius( piece, LV_OBJ_PART_MAIN, LV_STATE_DEFAULT, 1 );
+        lv_obj_set_click( piece, false );
+        lv_obj_set_pos( piece, SLV_RAND() % ( width - size ), -12 );
+        slv_confetti[ slv_confetti_cnt++ ] = piece;
+
+        lv_anim_t anim;
+        lv_anim_init( &anim );
+        lv_anim_set_var( &anim, piece );
+        lv_anim_set_exec_cb( &anim, (lv_anim_exec_xcb_t)lv_obj_set_y );
+        lv_anim_set_values( &anim, -12, height );
+        lv_anim_set_delay( &anim, SLV_RAND() % 1200 );
+        lv_anim_set_time( &anim, 1400 + SLV_RAND() % 1400 );
+        lv_anim_start( &anim );
+    }
+}
+
 static void slv_goto( slv_screen_t screen ) {
     slv_pending_screen = screen;
     slv_pending = true;
@@ -1699,6 +1749,7 @@ static void slv_show( slv_screen_t screen ) {
     slv_url_textarea = NULL;
     slv_built_lbl = NULL;
     lv_page_clean( slv_page );
+    slv_confetti_clear();
 
     lv_obj_set_hidden( slv_refresh_btn, !( screen == SCR_GROUPS || screen == SCR_ERROR ) );
     lv_obj_set_hidden( slv_setup_btn, screen != SCR_GROUPS );
@@ -1830,6 +1881,12 @@ static void slv_show( slv_screen_t screen ) {
             }
             snprintf( text, sizeof( text ), "Score : %d / %d", slv_score, slv_q_cnt );
             slv_add_label( text, false );
+            if ( slv_streak >= 2 ) {
+                snprintf( text, sizeof( text ), "#FFB74D %d jours de suite !#", slv_streak );
+                lv_label_set_recolor( slv_add_label( text, false ), true );
+            }
+            if ( pct >= 100 )
+                slv_confetti_start();
             slv_add_button( TXT_AGAIN );
             if ( slv_neighbor_sheet( 1 ) >= 0 )
                 slv_add_button( TXT_NEXT_SHEET );
@@ -2103,6 +2160,7 @@ static void slv_app_activate_cb( void ) {
 
 static void slv_app_hibernate_cb( void ) {
     keyboard_hide();
+    slv_confetti_clear();
     slv_advance_at = 0;
     slv_hold_screen( false );
 
